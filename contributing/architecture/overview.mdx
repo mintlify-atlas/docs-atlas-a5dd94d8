@@ -1,0 +1,235 @@
+---
+title: Architecture Overview
+description: Understand the high-level architecture of the Sentry JavaScript SDK monorepo.
+---
+
+The Sentry JavaScript SDK is a large monorepo containing 40+ packages that work together to provide error monitoring and performance tracking across multiple JavaScript platforms and frameworks.
+
+## Core Principles
+
+The SDK architecture is built on several key principles:
+
+### 1. Modular Design
+
+Each package has a specific purpose:
+- Core packages provide foundational functionality
+- Platform SDKs adapt the core to specific environments
+- Framework integrations provide framework-specific features
+- Integration packages add optional functionality
+
+### 2. Layered Architecture
+
+The SDK is organized in layers, from low-level to high-level:
+
+```
+┌─────────────────────────────────────────┐
+│   Framework Integrations (@sentry/*)    │  React, Vue, Next.js, etc.
+├─────────────────────────────────────────┤
+│      Platform SDKs (@sentry/*)          │  Browser, Node, Deno, Bun
+├─────────────────────────────────────────┤
+│    Core SDK (@sentry/core)              │  Base functionality
+├─────────────────────────────────────────┤
+│    Utilities & Browser Utils            │  Shared helpers
+└─────────────────────────────────────────┘
+```
+
+### 3. Shared Types and Interfaces
+
+All packages share common types and interfaces defined in `@sentry/core`, ensuring consistency across the SDK.
+
+<Note>
+  The `@sentry/types` package is deprecated. All types should be imported from `@sentry/core` instead.
+</Note>
+
+### 4. Build-Time Optimization
+
+The SDK uses build-time flags like `__DEBUG_BUILD__` to enable tree-shaking of debug code:
+
+```typescript
+if (__DEBUG_BUILD__) {
+  logger.log('This code is removed in production bundles');
+}
+```
+
+See [CONTRIBUTING.md:159-169](https://github.com/getsentry/sentry-javascript/blob/develop/CONTRIBUTING.md#L159-L169) for details.
+
+## Package Categories
+
+### Core Packages
+
+These packages provide the foundation for all other packages:
+
+- **`@sentry/core`** - Base SDK implementation, interfaces, types, and core functionality
+- **`@sentry/browser-utils`** - Browser-specific utilities and instrumentation
+- **`@sentry/node-core`** - Node.js core logic (excludes OpenTelemetry instrumentation)
+
+### Platform SDKs
+
+Platform SDKs provide environment-specific implementations:
+
+- **`@sentry/browser`** - Browser SDK + CDN bundles
+- **`@sentry/node`** - Node.js SDK with OpenTelemetry instrumentation
+- **`@sentry/bun`** - Bun runtime SDK
+- **`@sentry/deno`** - Deno runtime SDK
+- **`@sentry/cloudflare`** - Cloudflare Workers SDK
+- **`@sentry/vercel-edge`** - Vercel Edge runtime SDK
+
+### Framework Integrations
+
+These packages integrate Sentry with popular frameworks:
+
+- **`@sentry/react`** - React error boundaries and hooks
+- **`@sentry/vue`** - Vue error handler integration
+- **`@sentry/angular`** - Angular error handler
+- **`@sentry/svelte`** - Svelte error handler
+- **`@sentry/nextjs`** - Next.js with client/server integration
+- **`@sentry/nuxt`** - Nuxt with client/server integration
+- **`@sentry/sveltekit`** - SvelteKit with client/server integration
+- **`@sentry/remix`** - Remix framework integration
+- **`@sentry/astro`** - Astro framework integration
+- **`@sentry/gatsby`** - Gatsby framework integration
+- **`@sentry/nestjs`** - NestJS framework integration
+
+Many framework integrations have both client and server entry points.
+
+### Serverless SDKs
+
+- **`@sentry/aws-serverless`** - AWS Lambda functions
+- **`@sentry/google-cloud-serverless`** - Google Cloud Functions
+
+### User Experience Packages
+
+- **`@sentry/replay-internal`** - Session Replay implementation
+- **`@sentry/replay-canvas`** - Canvas recording for Replay
+- **`@sentry/replay-worker`** - Web Worker for Replay compression
+- **`@sentry/feedback`** - User feedback widget
+
+### Development Packages
+
+Located in `dev-packages/`, these support SDK development:
+
+- **`browser-integration-tests`** - Playwright browser tests
+- **`e2e-tests`** - E2E tests for 70+ framework combinations
+- **`node-integration-tests`** - Node.js integration tests
+- **`cloudflare-integration-tests`** - Cloudflare Workers tests
+- **`test-utils`** - Shared test utilities
+- **`rollup-utils`** - Build utilities
+
+## Key Concepts
+
+### Hubs and Scopes
+
+The SDK uses a Hub & Scope architecture to manage state:
+
+- **Hub** - Container for the current client and scope stack
+- **Scope** - Contains context data (user, tags, breadcrumbs, etc.)
+- **Client** - Processes and sends events to Sentry
+
+Learn more in the [Scopes documentation](https://develop.sentry.dev/sdk/telemetry/scopes.md).
+
+### Integrations
+
+Integrations extend SDK functionality:
+
+```typescript
+import * as Sentry from '@sentry/browser';
+import { Replay } from '@sentry/replay';
+
+Sentry.init({
+  dsn: '__DSN__',
+  integrations: [
+    Sentry.browserTracingIntegration(),
+    Sentry.replayIntegration(),
+  ],
+});
+```
+
+### Transports
+
+Transports handle sending events to Sentry:
+
+- Browser: `fetch` or `XHR`
+- Node.js: `http` or `https`
+- Edge: Platform-specific APIs
+
+### Instrumentation
+
+The SDK automatically instruments:
+
+- Errors and uncaught exceptions
+- HTTP requests
+- Database queries
+- User interactions
+- Performance metrics
+
+## Data Flow
+
+Here's how an error flows through the SDK:
+
+```
+1. Error occurs
+   ↓
+2. SDK captures error
+   ↓
+3. Error passed to Client
+   ↓
+4. Event processors run
+   ↓
+5. Integrations process event
+   ↓
+6. Scope data added
+   ↓
+7. beforeSend callback runs
+   ↓
+8. Event sent via Transport
+   ↓
+9. Sentry receives event
+```
+
+## Build System
+
+The monorepo uses:
+
+- **Yarn Workspaces** - Dependency management across packages
+- **Nx** - Task orchestration, caching, and affected analysis
+- **Rollup** - Bundling and transpilation
+- **TypeScript** - Type checking and `.d.ts` generation
+
+See [nx.json:12-61](https://github.com/getsentry/sentry-javascript/blob/develop/nx.json#L12-L61) for build target configuration.
+
+## Dependency Graph
+
+Packages depend on each other in a directed acyclic graph (DAG):
+
+```
+@sentry/react → @sentry/browser → @sentry/core
+                      ↓
+               @sentry/browser-utils → @sentry/core
+```
+
+Nx uses this graph to:
+- Build packages in the correct order
+- Run tests for affected packages
+- Cache build outputs
+
+## AI Integrations
+
+AI provider integrations are organized by runtime:
+
+- **Core instrumentation**: `packages/core/src/tracing/{provider}/`
+- **Node.js integration**: `packages/node/src/integrations/tracing/{provider}/`
+- **Edge runtime**: `packages/cloudflare/src/integrations/tracing/{provider}.ts`
+
+<Tip>
+  Use the `/add-ai-integration` skill when adding or modifying AI integrations.
+</Tip>
+
+## Version Support
+
+The SDK maintains backwards compatibility where possible and provides bug fixes and feature updates based on community demand and usage.
+
+## Next Steps
+
+- Learn about the [monorepo structure](/contributing/architecture/monorepo)
+- Explore [individual packages](/contributing/architecture/packages)
+- Understand the [development workflow](/contributing/workflow)

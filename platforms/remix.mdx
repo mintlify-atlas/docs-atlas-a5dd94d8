@@ -1,0 +1,524 @@
+---
+title: Remix SDK
+description: Error monitoring and performance tracking for Remix applications
+---
+
+The Sentry Remix SDK provides comprehensive error monitoring and performance tracking for Remix applications with support for both client and server-side rendering.
+
+## Installation
+
+<CodeGroup>
+```bash npm
+npm install @sentry/remix
+```
+
+```bash yarn
+yarn add @sentry/remix
+```
+
+```bash pnpm
+pnpm add @sentry/remix
+```
+</CodeGroup>
+
+## Version Compatibility
+
+- **Remix 2.x**: Fully supported (Vite & Classic Compiler)
+- **React Router 6.4+**: Full support
+- Works with all Remix runtimes (Node.js, Cloudflare Workers, Deno)
+
+## Basic Setup
+
+### Client-Side Configuration
+
+Create or update `app/entry.client.tsx`:
+
+```typescript
+import { RemixBrowser, useLocation, useMatches } from '@remix-run/react';
+import * as Sentry from '@sentry/remix';
+import { StrictMode, startTransition, useEffect } from 'react';
+import { hydrateRoot } from 'react-dom/client';
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  
+  integrations: [
+    Sentry.browserTracingIntegration({
+      useEffect,
+      useLocation,
+      useMatches,
+    }),
+    Sentry.replayIntegration(),
+  ],
+  
+  // Performance Monitoring
+  tracesSampleRate: 1.0,
+  
+  // Session Replay
+  replaysSessionSampleRate: 0.1,
+  replaysOnErrorSampleRate: 1.0,
+});
+
+startTransition(() => {
+  hydrateRoot(
+    document,
+    <StrictMode>
+      <RemixBrowser />
+    </StrictMode>,
+  );
+});
+```
+
+### Server-Side Configuration
+
+Create or update `app/entry.server.tsx`:
+
+```typescript
+import { PassThrough } from 'node:stream';
+import type { AppLoadContext, EntryContext } from '@remix-run/node';
+import { createReadableStreamFromReadable } from '@remix-run/node';
+import { RemixServer } from '@remix-run/react';
+import * as Sentry from '@sentry/remix';
+import { isbot } from 'isbot';
+import { renderToPipeableStream } from 'react-dom/server';
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  tracesSampleRate: 1.0,
+  
+  integrations: [
+    // Add server-side integrations
+  ],
+});
+
+export const handleError = Sentry.wrapHandleErrorWithSentry(
+  (error, { request }) => {
+    // Custom error handling logic
+    console.error('Error:', error);
+  }
+);
+
+// Standard Remix entry server code...
+export default function handleRequest(
+  request: Request,
+  responseStatusCode: number,
+  responseHeaders: Headers,
+  remixContext: EntryContext,
+  loadContext: AppLoadContext,
+) {
+  // Your render logic
+}
+```
+
+### Root Component Wrapper
+
+Wrap your root component in `app/root.tsx`:
+
+```typescript
+import {
+  Links,
+  Meta,
+  Outlet,
+  Scripts,
+  ScrollRestoration,
+} from '@remix-run/react';
+import { withSentry } from '@sentry/remix';
+
+function App() {
+  return (
+    <html lang="en">
+      <head>
+        <meta charSet="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <Meta />
+        <Links />
+      </head>
+      <body>
+        <Outlet />
+        <ScrollRestoration />
+        <Scripts />
+      </body>
+    </html>
+  );
+}
+
+export default withSentry(App);
+```
+
+## Error Handling
+
+### Route Loaders
+
+```typescript
+// app/routes/users.$id.tsx
+import type { LoaderFunctionArgs } from '@remix-run/node';
+import { json } from '@remix-run/node';
+import * as Sentry from '@sentry/remix';
+
+export async function loader({ params }: LoaderFunctionArgs) {
+  try {
+    const user = await fetchUser(params.id);
+    return json({ user });
+  } catch (error) {
+    Sentry.captureException(error);
+    throw json(
+      { error: 'User not found' },
+      { status: 404 }
+    );
+  }
+}
+```
+
+### Route Actions
+
+```typescript
+// app/routes/contact.tsx
+import type { ActionFunctionArgs } from '@remix-run/node';
+import { json, redirect } from '@remix-run/node';
+import * as Sentry from '@sentry/remix';
+
+export async function action({ request }: ActionFunctionArgs) {
+  return await Sentry.startSpan(
+    {
+      name: 'contact-form-submission',
+      op: 'http.server',
+    },
+    async () => {
+      const formData = await request.formData();
+      const email = formData.get('email');
+      
+      try {
+        await sendEmail(email);
+        return redirect('/success');
+      } catch (error) {
+        Sentry.captureException(error);
+        return json(
+          { error: 'Failed to send email' },
+          { status: 500 }
+        );
+      }
+    },
+  );
+}
+```
+
+### Component Errors
+
+```typescript
+import { useRouteError } from '@remix-run/react';
+import * as Sentry from '@sentry/remix';
+
+export function ErrorBoundary() {
+  const error = useRouteError();
+  
+  // Error is already captured by withSentry wrapper
+  
+  return (
+    <div>
+      <h1>Oops!</h1>
+      <p>Something went wrong.</p>
+    </div>
+  );
+}
+
+function MyComponent() {
+  const handleClick = async () => {
+    try {
+      await riskyOperation();
+    } catch (error) {
+      Sentry.captureException(error);
+    }
+  };
+  
+  return <button onClick={handleClick}>Click me</button>;
+}
+```
+
+## Performance Monitoring
+
+### Custom Transactions
+
+```typescript
+import * as Sentry from '@sentry/remix';
+
+export async function loader({ request }: LoaderFunctionArgs) {
+  return await Sentry.startSpan(
+    {
+      name: 'complex-loader-operation',
+      op: 'function.loader',
+      attributes: {
+        route: 'users',
+      },
+    },
+    async () => {
+      const data = await fetchComplexData();
+      return json({ data });
+    },
+  );
+}
+```
+
+### Database Queries
+
+```typescript
+import * as Sentry from '@sentry/remix';
+import { db } from '~/db.server';
+
+export async function getUser(id: string) {
+  return await Sentry.startSpan(
+    {
+      name: 'db.query.user',
+      op: 'db.query',
+      attributes: {
+        'db.system': 'postgresql',
+        'db.operation': 'SELECT',
+      },
+    },
+    async () => {
+      return await db.user.findUnique({ where: { id } });
+    },
+  );
+}
+```
+
+### Prisma Integration
+
+```typescript
+// app/entry.server.tsx
+import * as Sentry from '@sentry/remix';
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  integrations: [
+    Sentry.prismaIntegration(),
+  ],
+  tracesSampleRate: 1.0,
+});
+```
+
+## Context and User Information
+
+### Setting User Context
+
+```typescript
+// app/root.tsx
+import { useLoaderData } from '@remix-run/react';
+import * as Sentry from '@sentry/remix';
+import { useEffect } from 'react';
+
+export function loader({ request }: LoaderFunctionArgs) {
+  const user = await getUser(request);
+  return json({ user });
+}
+
+export default function App() {
+  const { user } = useLoaderData<typeof loader>();
+  
+  useEffect(() => {
+    if (user) {
+      Sentry.setUser({
+        id: user.id,
+        email: user.email,
+        username: user.username,
+      });
+    } else {
+      Sentry.setUser(null);
+    }
+  }, [user]);
+  
+  return (
+    // Your app layout
+  );
+}
+```
+
+### Server-Side Context
+
+```typescript
+import * as Sentry from '@sentry/remix';
+
+export async function loader({ request }: LoaderFunctionArgs) {
+  const user = await getUser(request);
+  
+  Sentry.setUser({
+    id: user.id,
+    email: user.email,
+  });
+  
+  Sentry.setContext('request', {
+    method: request.method,
+    url: request.url,
+  });
+  
+  return json({ user });
+}
+```
+
+## Source Maps
+
+For Remix with Vite, configure in `vite.config.ts`:
+
+```typescript
+import { vitePlugin as remix } from '@remix-run/dev';
+import { sentryVitePlugin } from '@sentry/vite-plugin';
+import { defineConfig } from 'vite';
+
+export default defineConfig({
+  build: {
+    sourcemap: true,
+  },
+  plugins: [
+    remix(),
+    sentryVitePlugin({
+      org: 'your-org',
+      project: 'your-project',
+      authToken: process.env.SENTRY_AUTH_TOKEN,
+    }),
+  ],
+});
+```
+
+For Classic Remix Compiler, use the CLI:
+
+```bash
+# Build with source maps
+remix build --sourcemap
+
+# Upload source maps
+npx sentry-cli sourcemaps upload --release=1.0.0 ./build
+```
+
+## Environment Variables
+
+Add to your `.env` file:
+
+```bash
+# Required
+SENTRY_DSN=your-dsn-here
+
+# For source maps
+SENTRY_AUTH_TOKEN=your-auth-token
+SENTRY_ORG=your-org
+SENTRY_PROJECT=your-project
+
+# Optional
+SENTRY_ENVIRONMENT=production
+SENTRY_RELEASE=1.0.0
+```
+
+Make environment variables available to the client:
+
+```typescript
+// app/root.tsx
+export async function loader() {
+  return json({
+    ENV: {
+      SENTRY_DSN: process.env.SENTRY_DSN,
+    },
+  });
+}
+
+export default function App() {
+  const data = useLoaderData<typeof loader>();
+  
+  return (
+    <html>
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `window.ENV = ${JSON.stringify(data.ENV)}`,
+          }}
+        />
+      </head>
+      <body>
+        <Outlet />
+      </body>
+    </html>
+  );
+}
+```
+
+## Deployment Platforms
+
+<Tabs>
+  <Tab title="Vercel">
+    Add environment variables in Vercel dashboard:
+    - `SENTRY_DSN`
+    - `SENTRY_AUTH_TOKEN`
+    - `SENTRY_ORG`
+    - `SENTRY_PROJECT`
+  </Tab>
+
+  <Tab title="Fly.io">
+    ```bash
+    fly secrets set SENTRY_DSN=your-dsn-here
+    fly secrets set SENTRY_AUTH_TOKEN=your-token
+    ```
+  </Tab>
+
+  <Tab title="Cloudflare Workers">
+    Use wrangler.toml for configuration:
+    ```toml
+    [vars]
+    SENTRY_DSN = "your-dsn-here"
+    ```
+  </Tab>
+</Tabs>
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Wrap Root" icon="gift">
+    Always wrap your root component with withSentry for error tracking.
+  </Card>
+  
+  <Card title="Handle Errors" icon="shield">
+    Use wrapHandleErrorWithSentry in entry.server.tsx.
+  </Card>
+  
+  <Card title="User Context" icon="user">
+    Set user context in loaders after authentication.
+  </Card>
+  
+  <Card title="Source Maps" icon="map">
+    Always upload source maps for production builds.
+  </Card>
+</CardGroup>
+
+## Troubleshooting
+
+<Accordion title="Errors Not Captured">
+  Ensure:
+  
+  1. Both entry.client.tsx and entry.server.tsx are initialized
+  2. Root component is wrapped with withSentry
+  3. DSN is correctly configured on both client and server
+</Accordion>
+
+<Accordion title="Performance Data Missing">
+  Verify:
+  
+  1. browserTracingIntegration is configured with Remix hooks
+  2. tracesSampleRate is set appropriately
+  3. React hooks (useEffect, useLocation, useMatches) are passed
+</Accordion>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Loaders" icon="download" href="/loaders">
+    Track data loading performance
+  </Card>
+  
+  <Card title="Actions" icon="bolt" href="/actions">
+    Monitor form submissions and mutations
+  </Card>
+  
+  <Card title="Session Replay" icon="video" href="/session-replay">
+    Debug with session recordings
+  </Card>
+  
+  <Card title="Prisma" icon="database" href="/prisma">
+    Integrate database monitoring
+  </Card>
+</CardGroup>

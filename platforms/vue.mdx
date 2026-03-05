@@ -1,0 +1,567 @@
+---
+title: Vue SDK
+description: Error monitoring and performance tracking for Vue.js applications
+---
+
+The Sentry Vue SDK provides error tracking and performance monitoring for Vue.js applications (Vue 2 and Vue 3).
+
+## Installation
+
+<CodeGroup>
+```bash npm
+npm install @sentry/vue
+```
+
+```bash yarn
+yarn add @sentry/vue
+```
+
+```bash pnpm
+pnpm add @sentry/vue
+```
+</CodeGroup>
+
+## Basic Setup
+
+<Tabs>
+  <Tab title="Vue 3">
+    Initialize Sentry before creating your Vue app:
+
+    ```javascript
+    import { createApp } from 'vue';
+    import { createRouter } from 'vue-router';
+    import * as Sentry from '@sentry/vue';
+    import App from './App.vue';
+
+    const app = createApp(App);
+    const router = createRouter({
+      // your router config
+    });
+
+    Sentry.init({
+      app,
+      dsn: 'YOUR_DSN_HERE',
+      
+      integrations: [
+        Sentry.browserTracingIntegration({ router }),
+        Sentry.replayIntegration(),
+      ],
+      
+      // Performance Monitoring
+      tracesSampleRate: 1.0,
+      tracePropagationTargets: ['localhost', /^https:\/\/yourserver\.io\/api/],
+      
+      // Session Replay
+      replaysSessionSampleRate: 0.1,
+      replaysOnErrorSampleRate: 1.0,
+    });
+
+    app.use(router);
+    app.mount('#app');
+    ```
+  </Tab>
+
+  <Tab title="Vue 2">
+    Initialize Sentry before creating your Vue instance:
+
+    ```javascript
+    import Vue from 'vue';
+    import VueRouter from 'vue-router';
+    import * as Sentry from '@sentry/vue';
+    import App from './App.vue';
+
+    Vue.use(VueRouter);
+
+    const router = new VueRouter({
+      // your router config
+    });
+
+    Sentry.init({
+      Vue,
+      dsn: 'YOUR_DSN_HERE',
+      
+      integrations: [
+        Sentry.browserTracingIntegration({ router }),
+        Sentry.replayIntegration(),
+      ],
+      
+      tracesSampleRate: 1.0,
+      replaysSessionSampleRate: 0.1,
+      replaysOnErrorSampleRate: 1.0,
+    });
+
+    new Vue({
+      router,
+      render: h => h(App),
+    }).$mount('#app');
+    ```
+  </Tab>
+</Tabs>
+
+## Vue-Specific Features
+
+### Error Handler Integration
+
+Automatically captures Vue component errors:
+
+```javascript
+import * as Sentry from '@sentry/vue';
+
+Sentry.init({
+  app, // or Vue for Vue 2
+  dsn: 'YOUR_DSN_HERE',
+  
+  // Customize error handling
+  attachProps: true, // Attach component props
+  logErrors: true,   // Log errors to console
+  
+  // Hook options
+  hooks: ['mount', 'update', 'destroy'],
+});
+```
+
+### Component Tracking
+
+Track specific component lifecycle events:
+
+```javascript
+import * as Sentry from '@sentry/vue';
+
+Sentry.init({
+  app,
+  dsn: 'YOUR_DSN_HERE',
+  
+  // Track component lifecycle
+  trackComponents: true,
+  
+  // Set a timeout for component tracking (ms)
+  timeout: 2000,
+  
+  // Which hooks to track
+  hooks: ['mount', 'update'],
+});
+```
+
+## Vue Router Integration
+
+Automatic route change tracking:
+
+```javascript
+import { createApp } from 'vue';
+import { createRouter, createWebHistory } from 'vue-router';
+import * as Sentry from '@sentry/vue';
+
+const router = createRouter({
+  history: createWebHistory(),
+  routes: [
+    { path: '/', component: Home },
+    { path: '/about', component: About },
+    { path: '/user/:id', component: User },
+  ],
+});
+
+const app = createApp(App);
+
+Sentry.init({
+  app,
+  dsn: 'YOUR_DSN_HERE',
+  integrations: [
+    Sentry.browserTracingIntegration({
+      router,
+      routeLabel: 'path', // or 'name'
+    }),
+  ],
+  tracesSampleRate: 1.0,
+});
+
+app.use(router);
+```
+
+## Pinia Integration
+
+Track Pinia store actions:
+
+```javascript
+import { createApp } from 'vue';
+import { createPinia } from 'pinia';
+import * as Sentry from '@sentry/vue';
+
+const app = createApp(App);
+const pinia = createPinia();
+
+// Add Sentry plugin to Pinia
+pinia.use(Sentry.createSentryPiniaPlugin());
+
+app.use(pinia);
+```
+
+This will:
+- Attach store state to error events
+- Create breadcrumbs for store mutations
+- Track action performance
+
+## Performance Monitoring
+
+### Component Performance
+
+Track component render times:
+
+```javascript
+import * as Sentry from '@sentry/vue';
+
+Sentry.init({
+  app,
+  dsn: 'YOUR_DSN_HERE',
+  
+  integrations: [
+    Sentry.browserTracingIntegration(),
+  ],
+  
+  tracesSampleRate: 1.0,
+  
+  // Track component performance
+  trackComponents: true,
+  timeout: 2000,
+  hooks: ['mount', 'update'],
+});
+```
+
+### Custom Spans
+
+Add custom performance tracking:
+
+```javascript
+import * as Sentry from '@sentry/vue';
+
+export default {
+  name: 'UserProfile',
+  
+  async mounted() {
+    await Sentry.startSpan(
+      {
+        name: 'load-user-data',
+        op: 'http.client',
+      },
+      async () => {
+        const response = await fetch(`/api/user/${this.userId}`);
+        this.userData = await response.json();
+      },
+    );
+  },
+};
+```
+
+## Composition API
+
+Use Sentry in Vue 3 Composition API:
+
+```javascript
+import { onMounted, ref } from 'vue';
+import * as Sentry from '@sentry/vue';
+
+export default {
+  setup() {
+    const data = ref(null);
+    const error = ref(null);
+    
+    onMounted(async () => {
+      try {
+        await Sentry.startSpan(
+          { name: 'fetch-data', op: 'http.client' },
+          async () => {
+            const response = await fetch('/api/data');
+            data.value = await response.json();
+          },
+        );
+      } catch (err) {
+        error.value = err;
+        Sentry.captureException(err);
+      }
+    });
+    
+    return { data, error };
+  },
+};
+```
+
+## Error Handling
+
+### Global Error Handler
+
+The SDK automatically integrates with Vue's error handler:
+
+```javascript
+// This is handled automatically
+export default {
+  name: 'BrokenComponent',
+  
+  mounted() {
+    // This error will be captured by Sentry
+    throw new Error('Component error');
+  },
+};
+```
+
+### Manual Error Capture
+
+```javascript
+import * as Sentry from '@sentry/vue';
+
+export default {
+  name: 'MyComponent',
+  
+  methods: {
+    async handleAction() {
+      try {
+        await riskyOperation();
+      } catch (error) {
+        Sentry.captureException(error, {
+          tags: {
+            component: 'MyComponent',
+            action: 'handleAction',
+          },
+        });
+      }
+    },
+  },
+};
+```
+
+## Context & Breadcrumbs
+
+### Component Context
+
+```javascript
+import * as Sentry from '@sentry/vue';
+
+export default {
+  name: 'UserDashboard',
+  
+  mounted() {
+    // Set user context
+    Sentry.setUser({
+      id: this.user.id,
+      email: this.user.email,
+      username: this.user.username,
+    });
+    
+    // Add custom context
+    Sentry.setContext('dashboard', {
+      section: 'overview',
+      permissions: this.user.permissions,
+    });
+    
+    // Add breadcrumb
+    Sentry.addBreadcrumb({
+      category: 'navigation',
+      message: 'User entered dashboard',
+      level: 'info',
+    });
+  },
+};
+```
+
+## Advanced Configuration
+
+<Tabs>
+  <Tab title="Vue Integration Options">
+    ```javascript
+    import * as Sentry from '@sentry/vue';
+
+    Sentry.init({
+      app,
+      dsn: 'YOUR_DSN_HERE',
+      
+      integrations: [
+        Sentry.vueIntegration({
+          // Attach component props to errors
+          attachProps: true,
+          
+          // Log errors to console
+          logErrors: true,
+          
+          // Track component performance
+          trackComponents: true,
+          
+          // Component tracking timeout (ms)
+          timeout: 2000,
+          
+          // Which lifecycle hooks to track
+          hooks: ['mount', 'update', 'destroy'],
+        }),
+      ],
+    });
+    ```
+  </Tab>
+
+  <Tab title="Router Options">
+    ```javascript
+    import * as Sentry from '@sentry/vue';
+
+    Sentry.init({
+      app,
+      dsn: 'YOUR_DSN_HERE',
+      
+      integrations: [
+        Sentry.browserTracingIntegration({
+          router,
+          
+          // Use route path or name for transaction names
+          routeLabel: 'path', // or 'name'
+          
+          // Enable tracking of router navigation timing
+          enableNavigationSpans: true,
+        }),
+      ],
+    });
+    ```
+  </Tab>
+
+  <Tab title="Filtering">
+    ```javascript
+    import * as Sentry from '@sentry/vue';
+
+    Sentry.init({
+      app,
+      dsn: 'YOUR_DSN_HERE',
+      
+      beforeSend(event, hint) {
+        // Filter Vue-specific errors
+        if (hint.originalException?.isVueError) {
+          // Modify or drop event
+          event.tags = {
+            ...event.tags,
+            vue_version: app.version,
+          };
+        }
+        return event;
+      },
+      
+      ignoreErrors: [
+        // Ignore specific Vue warnings
+        'Vue warn',
+        'Unknown custom element',
+      ],
+    });
+    ```
+  </Tab>
+</Tabs>
+
+## Tracing Mixins (Vue 2)
+
+For Vue 2, use tracing mixins:
+
+```javascript
+import Vue from 'vue';
+import * as Sentry from '@sentry/vue';
+
+const tracingMixin = Sentry.createTracingMixins({
+  trackComponents: true,
+  timeout: 2000,
+  hooks: ['mount', 'update'],
+});
+
+// Apply globally
+Vue.mixin(tracingMixin);
+
+// Or per component
+export default {
+  mixins: [tracingMixin],
+  name: 'MyComponent',
+  // ...
+};
+```
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Initialize Early" icon="bolt">
+    Initialize Sentry before creating your Vue app to catch all errors.
+  </Card>
+  
+  <Card title="Router Integration" icon="route">
+    Always pass your router instance for accurate navigation tracking.
+  </Card>
+  
+  <Card title="Component Tracking" icon="chart-line">
+    Enable component tracking to understand performance bottlenecks.
+  </Card>
+  
+  <Card title="Pinia Plugin" icon="database">
+    Use the Pinia plugin to track store actions and state.
+  </Card>
+</CardGroup>
+
+## Examples
+
+<Accordion title="Complete Vue 3 Setup">
+  ```javascript
+  import { createApp } from 'vue';
+  import { createRouter, createWebHistory } from 'vue-router';
+  import { createPinia } from 'pinia';
+  import * as Sentry from '@sentry/vue';
+  import App from './App.vue';
+  import routes from './routes';
+
+  const app = createApp(App);
+  
+  const router = createRouter({
+    history: createWebHistory(),
+    routes,
+  });
+  
+  const pinia = createPinia();
+  pinia.use(Sentry.createSentryPiniaPlugin());
+
+  Sentry.init({
+    app,
+    dsn: 'YOUR_DSN_HERE',
+    
+    environment: import.meta.env.MODE,
+    release: import.meta.env.VITE_APP_VERSION,
+    
+    integrations: [
+      Sentry.browserTracingIntegration({
+        router,
+        routeLabel: 'path',
+      }),
+      Sentry.replayIntegration({
+        maskAllText: false,
+        blockAllMedia: false,
+      }),
+    ],
+    
+    tracesSampleRate: 0.2,
+    replaysSessionSampleRate: 0.1,
+    replaysOnErrorSampleRate: 1.0,
+    
+    trackComponents: true,
+    hooks: ['mount', 'update'],
+    timeout: 2000,
+  });
+
+  app.use(router);
+  app.use(pinia);
+  app.mount('#app');
+  ```
+</Accordion>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Vue Router" icon="route" href="/routing">
+    Advanced router integration patterns
+  </Card>
+  
+  <Card title="Pinia" icon="database" href="/state-management">
+    State management tracking
+  </Card>
+  
+  <Card title="Performance" icon="gauge-high" href="/performance">
+    Component performance monitoring
+  </Card>
+  
+  <Card title="Source Maps" icon="map" href="/sourcemaps">
+    Upload source maps for better stack traces
+  </Card>
+</CardGroup>

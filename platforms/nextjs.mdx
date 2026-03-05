@@ -1,0 +1,471 @@
+---
+title: Next.js SDK
+description: Error monitoring and performance tracking for Next.js applications
+---
+
+The Sentry Next.js SDK provides automatic error monitoring and performance tracking for Next.js applications with support for App Router, Pages Router, Server Components, and Edge Runtime.
+
+## Installation
+
+<Steps>
+  <Step title="Install with Wizard">
+    The easiest way to set up Sentry in Next.js is using the Sentry Wizard:
+
+    ```bash
+    npx @sentry/wizard@latest -i nextjs
+    ```
+
+    The wizard will:
+    - Install the `@sentry/nextjs` package
+    - Create configuration files
+    - Set up source maps upload
+    - Configure build-time instrumentation
+  </Step>
+
+  <Step title="Manual Installation">
+    Alternatively, install manually:
+
+    <CodeGroup>
+    ```bash npm
+    npm install @sentry/nextjs
+    ```
+
+    ```bash yarn
+    yarn add @sentry/nextjs
+    ```
+
+    ```bash pnpm
+    pnpm add @sentry/nextjs
+    ```
+    </CodeGroup>
+  </Step>
+</Steps>
+
+## Version Compatibility
+
+- **Next.js 13.2+**: Fully supported (App Router & Pages Router)
+- **Next.js 15+**: Full support including Turbopack (beta)
+- **Next.js 16+**: Turbopack default bundler support
+
+## Basic Setup
+
+### Client Configuration
+
+Create `sentry.client.config.ts` (or `.js`) in your project root:
+
+```typescript
+import * as Sentry from '@sentry/nextjs';
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  
+  // Performance Monitoring
+  tracesSampleRate: 1.0,
+  
+  // Session Replay
+  replaysSessionSampleRate: 0.1,
+  replaysOnErrorSampleRate: 1.0,
+  
+  integrations: [
+    Sentry.replayIntegration(),
+  ],
+});
+```
+
+### Server Configuration
+
+Create `sentry.server.config.ts` (or `.js`) in your project root:
+
+```typescript
+import * as Sentry from '@sentry/nextjs';
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  
+  // Performance Monitoring
+  tracesSampleRate: 1.0,
+  
+  // Server-specific options
+  debug: false,
+});
+```
+
+### Edge Runtime Configuration
+
+Create `sentry.edge.config.ts` (or `.js`) for Edge runtime:
+
+```typescript
+import * as Sentry from '@sentry/nextjs';
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  tracesSampleRate: 1.0,
+});
+```
+
+## Next.js Configuration
+
+Wrap your `next.config.js` with `withSentryConfig`:
+
+<Tabs>
+  <Tab title="next.config.js">
+    ```javascript
+    const { withSentryConfig } = require('@sentry/nextjs');
+
+    /** @type {import('next').NextConfig} */
+    const nextConfig = {
+      // Your existing Next.js config
+    };
+
+    module.exports = withSentryConfig(
+      nextConfig,
+      {
+        // Sentry configuration options
+        silent: true,
+        org: 'your-org',
+        project: 'your-project',
+      },
+      {
+        // Build-time configuration
+        widenClientFileUpload: true,
+        transpileClientSDK: true,
+        hideSourceMaps: true,
+        disableLogger: true,
+      }
+    );
+    ```
+  </Tab>
+
+  <Tab title="next.config.mjs (ESM)">
+    ```javascript
+    import { withSentryConfig } from '@sentry/nextjs';
+
+    /** @type {import('next').NextConfig} */
+    const nextConfig = {
+      // Your existing Next.js config
+    };
+
+    export default withSentryConfig(
+      nextConfig,
+      {
+        silent: true,
+        org: 'your-org',
+        project: 'your-project',
+      },
+      {
+        widenClientFileUpload: true,
+        transpileClientSDK: true,
+        hideSourceMaps: true,
+      }
+    );
+    ```
+  </Tab>
+</Tabs>
+
+## App Router Features
+
+### Server Components
+
+Sentry automatically instruments Server Components:
+
+```typescript
+// app/page.tsx
+import * as Sentry from '@sentry/nextjs';
+
+export default async function Page() {
+  // Errors in Server Components are automatically captured
+  const data = await fetchData();
+  
+  return <div>{data.title}</div>;
+}
+
+// Custom error tracking
+export async function getData() {
+  try {
+    return await fetch('/api/data');
+  } catch (error) {
+    Sentry.captureException(error);
+    throw error;
+  }
+}
+```
+
+### Route Handlers
+
+Route handlers are automatically instrumented:
+
+```typescript
+// app/api/hello/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import * as Sentry from '@sentry/nextjs';
+
+export async function GET(request: NextRequest) {
+  try {
+    const data = await fetchData();
+    return NextResponse.json(data);
+  } catch (error) {
+    Sentry.captureException(error);
+    return NextResponse.json(
+      { error: 'Internal Server Error' },
+      { status: 500 }
+    );
+  }
+}
+```
+
+### Server Actions
+
+Wrap Server Actions for error tracking:
+
+```typescript
+'use server';
+
+import * as Sentry from '@sentry/nextjs';
+
+export async function submitForm(formData: FormData) {
+  return await Sentry.withServerActionInstrumentation(
+    'submitForm',
+    async () => {
+      const name = formData.get('name');
+      // Your server action logic
+      return { success: true };
+    },
+  );
+}
+```
+
+## Pages Router Features
+
+### API Routes
+
+Wrap API routes for automatic instrumentation:
+
+```typescript
+// pages/api/hello.ts
+import type { NextApiRequest, NextApiResponse } from 'next';
+import { wrapApiHandlerWithSentry } from '@sentry/nextjs';
+
+async function handler(
+  req: NextApiRequest,
+  res: NextApiResponse
+) {
+  const data = await fetchData();
+  res.status(200).json(data);
+}
+
+export default wrapApiHandlerWithSentry(handler, '/api/hello');
+```
+
+### Data Fetching Methods
+
+```typescript
+// pages/index.tsx
+import * as Sentry from '@sentry/nextjs';
+
+export async function getServerSideProps() {
+  try {
+    const data = await fetchData();
+    return { props: { data } };
+  } catch (error) {
+    Sentry.captureException(error);
+    return { props: { error: true } };
+  }
+}
+```
+
+### Custom Error Page
+
+Create a custom error page with Sentry:
+
+```typescript
+// pages/_error.tsx
+import * as Sentry from '@sentry/nextjs';
+import NextErrorComponent from 'next/error';
+import type { NextPageContext } from 'next';
+
+const CustomErrorComponent = (props: any) => {
+  return <NextErrorComponent statusCode={props.statusCode} />;
+};
+
+CustomErrorComponent.getInitialProps = async (
+  contextData: NextPageContext
+) => {
+  await Sentry.captureUnderscoreErrorException(contextData);
+  return NextErrorComponent.getInitialProps(contextData);
+};
+
+export default CustomErrorComponent;
+```
+
+## Middleware Instrumentation
+
+```typescript
+// middleware.ts
+import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
+
+export function middleware(request: NextRequest) {
+  // Middleware is automatically instrumented
+  const response = NextResponse.next();
+  
+  // Add custom headers or logic
+  return response;
+}
+
+export const config = {
+  matcher: ['/api/:path*', '/protected/:path*'],
+};
+```
+
+## Environment Variables
+
+Add these to your `.env.local` or deployment environment:
+
+```bash
+# Required
+SENTRY_DSN=your-dsn-here
+
+# For source maps upload
+SENTRY_AUTH_TOKEN=your-auth-token
+SENTRY_ORG=your-org-slug
+SENTRY_PROJECT=your-project-slug
+
+# Optional
+NEXT_PUBLIC_SENTRY_DSN=your-dsn-here  # For client-side
+SENTRY_ENVIRONMENT=production
+SENTRY_RELEASE=1.0.0
+```
+
+## Performance Monitoring
+
+### Custom Transactions
+
+```typescript
+import * as Sentry from '@sentry/nextjs';
+
+export async function complexOperation() {
+  return await Sentry.startSpan(
+    {
+      name: 'complex-operation',
+      op: 'function',
+    },
+    async () => {
+      // Your operation logic
+      const result = await performOperation();
+      return result;
+    },
+  );
+}
+```
+
+### Database Queries
+
+```typescript
+import * as Sentry from '@sentry/nextjs';
+
+export async function fetchUser(id: string) {
+  return await Sentry.startSpan(
+    {
+      name: 'fetch-user',
+      op: 'db.query',
+      attributes: {
+        'db.system': 'postgresql',
+        'db.operation': 'SELECT',
+      },
+    },
+    async () => {
+      return await db.user.findUnique({ where: { id } });
+    },
+  );
+}
+```
+
+## Source Maps
+
+Source maps are automatically uploaded during build when configured:
+
+```javascript
+// next.config.js
+module.exports = withSentryConfig(
+  nextConfig,
+  {
+    silent: false,
+    org: 'your-org',
+    project: 'your-project',
+    authToken: process.env.SENTRY_AUTH_TOKEN,
+  },
+  {
+    widenClientFileUpload: true,
+    hideSourceMaps: true,
+    disableLogger: true,
+  }
+);
+```
+
+## Turbopack Support
+
+For Next.js 15+ with Turbopack:
+
+```bash
+next dev --turbo
+```
+
+Sentry automatically detects Turbopack and adjusts instrumentation accordingly. Note that build-time wrapping is limited in Turbopack mode.
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Separate Configs" icon="file-code">
+    Use separate config files for client, server, and edge runtimes.
+  </Card>
+  
+  <Card title="Source Maps" icon="map">
+    Always upload source maps for production builds.
+  </Card>
+  
+  <Card title="Error Boundaries" icon="shield">
+    Use React Error Boundaries in client components.
+  </Card>
+  
+  <Card title="Environment Variables" icon="key">
+    Store sensitive data in environment variables.
+  </Card>
+</CardGroup>
+
+## Troubleshooting
+
+<Accordion title="Build Errors with Turbopack">
+  If you encounter build errors with Turbopack:
+  
+  1. Ensure you're using Next.js 15.6+
+  2. Check that `@sentry/nextjs` is up to date
+  3. Try disabling automatic instrumentation in `next.config.js`
+</Accordion>
+
+<Accordion title="Source Maps Not Uploaded">
+  Verify:
+  
+  1. `SENTRY_AUTH_TOKEN` is set
+  2. `org` and `project` are correct in `withSentryConfig`
+  3. `silent: false` to see upload logs
+</Accordion>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="App Router" icon="route" href="/app-router">
+    Deep dive into App Router features
+  </Card>
+  
+  <Card title="Server Actions" icon="server" href="/server-actions">
+    Track Server Actions and mutations
+  </Card>
+  
+  <Card title="Middleware" icon="filter" href="/middleware">
+    Instrument Next.js middleware
+  </Card>
+  
+  <Card title="Source Maps" icon="map" href="/sourcemaps">
+    Advanced source map configuration
+  </Card>
+</CardGroup>

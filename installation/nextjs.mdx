@@ -1,0 +1,584 @@
+---
+title: 'Next.js Installation'
+description: 'Install and configure the Sentry SDK for Next.js applications'
+---
+
+The `@sentry/nextjs` package provides comprehensive error tracking and performance monitoring for Next.js applications, with automatic instrumentation for both client and server components.
+
+## Prerequisites
+
+- Node.js 18 or newer
+- Next.js 13.2.0 or newer (supports Next.js 13, 14, 15, and 16)
+- A Sentry account and project DSN
+
+## Quick Installation with Wizard
+
+The fastest way to get started is using the Sentry Next.js Wizard:
+
+```bash
+npx @sentry/wizard@latest -i nextjs
+```
+
+The wizard will:
+1. Install `@sentry/nextjs`
+2. Create configuration files
+3. Set up source map uploads
+4. Add example error buttons (optional)
+
+<Tip>
+  The wizard automates the entire setup process. If you prefer manual installation, follow the steps below.
+</Tip>
+
+## Manual Installation
+
+<Steps>
+  <Step title="Install the Package">
+    Install `@sentry/nextjs` using your preferred package manager:
+
+    <CodeGroup>
+    ```bash npm
+    npm install @sentry/nextjs
+    ```
+
+    ```bash yarn
+    yarn add @sentry/nextjs
+    ```
+
+    ```bash pnpm
+    pnpm add @sentry/nextjs
+    ```
+    </CodeGroup>
+
+    **Current Version:** 10.42.0
+  </Step>
+
+  <Step title="Create Configuration Files">
+    Create three configuration files in your project root:
+
+    **`sentry.client.config.ts`** - Client-side configuration:
+    ```typescript
+    import * as Sentry from '@sentry/nextjs';
+
+    Sentry.init({
+      dsn: 'YOUR_DSN_HERE',
+      
+      // Adjust this value in production
+      tracesSampleRate: 1.0,
+      
+      // Setting this option to true will print useful information to the console
+      debug: false,
+      
+      replaysOnErrorSampleRate: 1.0,
+      replaysSessionSampleRate: 0.1,
+      
+      integrations: [
+        Sentry.replayIntegration({
+          maskAllText: true,
+          blockAllMedia: true,
+        }),
+      ],
+    });
+    ```
+
+    **`sentry.server.config.ts`** - Server-side configuration:
+    ```typescript
+    import * as Sentry from '@sentry/nextjs';
+
+    Sentry.init({
+      dsn: 'YOUR_DSN_HERE',
+      
+      tracesSampleRate: 1.0,
+      
+      debug: false,
+    });
+    ```
+
+    **`sentry.edge.config.ts`** - Edge runtime configuration:
+    ```typescript
+    import * as Sentry from '@sentry/nextjs';
+
+    Sentry.init({
+      dsn: 'YOUR_DSN_HERE',
+      
+      tracesSampleRate: 1.0,
+      
+      debug: false,
+    });
+    ```
+  </Step>
+
+  <Step title="Configure Next.js">
+    Wrap your Next.js configuration with Sentry in `next.config.js` or `next.config.mjs`:
+
+    <CodeGroup>
+    ```javascript CommonJS
+    // next.config.js
+    const { withSentryConfig } = require('@sentry/nextjs');
+
+    /** @type {import('next').NextConfig} */
+    const nextConfig = {
+      // Your existing Next.js config
+    };
+
+    module.exports = withSentryConfig(nextConfig, {
+      // Sentry configuration options
+      silent: true,
+      org: 'your-org',
+      project: 'your-project',
+    });
+    ```
+
+    ```javascript ES Modules
+    // next.config.mjs
+    import { withSentryConfig } from '@sentry/nextjs';
+
+    /** @type {import('next').NextConfig} */
+    const nextConfig = {
+      // Your existing Next.js config
+    };
+
+    export default withSentryConfig(nextConfig, {
+      silent: true,
+      org: 'your-org',
+      project: 'your-project',
+    });
+    ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Set Environment Variables">
+    Add your Sentry auth token to `.env.local`:
+
+    ```bash
+    SENTRY_AUTH_TOKEN=your_auth_token_here
+    ```
+
+    <Warning>
+      Never commit your `.env.local` file to version control. Add it to `.gitignore`.
+    </Warning>
+  </Step>
+
+  <Step title="Verify Installation">
+    Create a test page to verify Sentry is working:
+
+    ```typescript
+    // app/sentry-test/page.tsx
+    'use client';
+
+    import * as Sentry from '@sentry/nextjs';
+
+    export default function SentryTestPage() {
+      return (
+        <button
+          onClick={() => {
+            Sentry.captureException(new Error('Test error'));
+          }}
+        >
+          Trigger Test Error
+        </button>
+      );
+    }
+    ```
+
+    Visit the page and click the button. Check your Sentry dashboard to see the error.
+  </Step>
+</Steps>
+
+## App Router (Next.js 13+)
+
+### Server Components
+
+For Server Components, use Sentry in Server Actions:
+
+```typescript
+// app/actions.ts
+'use server';
+
+import * as Sentry from '@sentry/nextjs';
+
+export async function myServerAction() {
+  try {
+    // Your code
+    const result = await someAsyncOperation();
+    return result;
+  } catch (error) {
+    Sentry.captureException(error);
+    throw error;
+  }
+}
+```
+
+### Client Components
+
+For Client Components:
+
+```typescript
+// app/components/MyComponent.tsx
+'use client';
+
+import { useEffect } from 'react';
+import * as Sentry from '@sentry/nextjs';
+
+export default function MyComponent() {
+  useEffect(() => {
+    // Track component mount
+    Sentry.addBreadcrumb({
+      category: 'component',
+      message: 'MyComponent mounted',
+      level: 'info',
+    });
+  }, []);
+  
+  const handleError = () => {
+    try {
+      // Potentially error-throwing code
+    } catch (error) {
+      Sentry.captureException(error);
+    }
+  };
+  
+  return <div>{/* Component JSX */}</div>;
+}
+```
+
+### Error Boundary
+
+Use Sentry's Error Boundary:
+
+```typescript
+// app/layout.tsx
+import * as Sentry from '@sentry/nextjs';
+
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <html>
+      <body>
+        <Sentry.ErrorBoundary fallback={<ErrorFallback />}>
+          {children}
+        </Sentry.ErrorBoundary>
+      </body>
+    </html>
+  );
+}
+
+function ErrorFallback() {
+  return <div>An error occurred</div>;
+}
+```
+
+### API Routes
+
+Wrap API routes with Sentry:
+
+```typescript
+// app/api/users/route.ts
+import { NextResponse } from 'next/server';
+import * as Sentry from '@sentry/nextjs';
+
+export async function GET() {
+  try {
+    const users = await fetchUsers();
+    return NextResponse.json(users);
+  } catch (error) {
+    Sentry.captureException(error);
+    return NextResponse.json({ error: 'Failed to fetch users' }, { status: 500 });
+  }
+}
+```
+
+## Pages Router (Legacy)
+
+### Custom Error Page
+
+Create `pages/_error.tsx`:
+
+```typescript
+import * as Sentry from '@sentry/nextjs';
+import type { NextPageContext } from 'next';
+import type { ErrorProps } from 'next/error';
+import NextError from 'next/error';
+
+function CustomErrorComponent(props: ErrorProps) {
+  return <NextError statusCode={props.statusCode} />;
+}
+
+CustomErrorComponent.getInitialProps = async (contextData: NextPageContext) => {
+  await Sentry.captureUnderscoreErrorException(contextData);
+  return NextError.getInitialProps(contextData);
+};
+
+export default CustomErrorComponent;
+```
+
+### API Routes
+
+```typescript
+// pages/api/users.ts
+import type { NextApiRequest, NextApiResponse } from 'next';
+import * as Sentry from '@sentry/nextjs';
+
+export default async function handler(
+  req: NextApiRequest,
+  res: NextApiResponse
+) {
+  try {
+    const users = await fetchUsers();
+    res.status(200).json(users);
+  } catch (error) {
+    Sentry.captureException(error);
+    res.status(500).json({ error: 'Failed to fetch users' });
+  }
+}
+```
+
+### getServerSideProps / getStaticProps
+
+```typescript
+import * as Sentry from '@sentry/nextjs';
+import type { GetServerSideProps } from 'next';
+
+export const getServerSideProps: GetServerSideProps = async (context) => {
+  try {
+    const data = await fetchData();
+    return { props: { data } };
+  } catch (error) {
+    Sentry.captureException(error);
+    return { notFound: true };
+  }
+};
+```
+
+## Middleware
+
+Instrument Next.js middleware:
+
+```typescript
+// middleware.ts
+import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
+
+export function middleware(request: NextRequest) {
+  // Your middleware logic
+  return NextResponse.next();
+}
+
+export const config = {
+  matcher: ['/api/:path*'],
+};
+```
+
+Sentry automatically instruments middleware when using `withSentryConfig`.
+
+## Performance Monitoring
+
+### Automatic Instrumentation
+
+The SDK automatically creates spans for:
+- Page loads
+- Navigation
+- API routes
+- Server components
+- Data fetching (`fetch`, `getServerSideProps`, etc.)
+
+### Custom Spans
+
+```typescript
+import * as Sentry from '@sentry/nextjs';
+
+export default async function Page() {
+  const data = await Sentry.startSpan(
+    { name: 'fetch-user-data', op: 'db.query' },
+    async () => {
+      return await db.user.findMany();
+    }
+  );
+  
+  return <div>{/* Render data */}</div>;
+}
+```
+
+## Session Replay
+
+Configure Session Replay in your client config:
+
+```typescript
+// sentry.client.config.ts
+import * as Sentry from '@sentry/nextjs';
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  
+  integrations: [
+    Sentry.replayIntegration({
+      maskAllText: true,
+      blockAllMedia: true,
+      maskAllInputs: true,
+    }),
+  ],
+  
+  replaysSessionSampleRate: 0.1,
+  replaysOnErrorSampleRate: 1.0,
+});
+```
+
+## Source Maps
+
+The SDK automatically handles source map uploads when you use `withSentryConfig`. Configure upload options:
+
+```javascript
+// next.config.js
+module.exports = withSentryConfig(
+  nextConfig,
+  {
+    silent: true,
+    org: 'your-org',
+    project: 'your-project',
+    authToken: process.env.SENTRY_AUTH_TOKEN,
+  },
+  {
+    widenClientFileUpload: true,
+    hideSourceMaps: true,
+    disableLogger: true,
+  }
+);
+```
+
+## Webpack vs Turbopack
+
+<Note>
+  Next.js 16+ uses **Turbopack** by default. Next.js 15 and earlier use **Webpack**.
+</Note>
+
+### Turbopack Considerations
+
+With Turbopack:
+- No build-time function wrapping
+- Automatic instrumentation via OpenTelemetry
+- Source maps handled differently
+- Some webpack-specific options don't apply
+
+### Webpack Configuration
+
+For Webpack builds, the SDK wraps your functions automatically. You can control this:
+
+```javascript
+module.exports = withSentryConfig(
+  nextConfig,
+  {
+    // ... other options
+  },
+  {
+    autoInstrumentServerFunctions: true,
+    autoInstrumentMiddleware: true,
+    autoInstrumentAppDirectory: true,
+    
+    // Exclude specific routes
+    excludeServerRoutes: [
+      '/api/healthcheck',
+      '/api/metrics',
+    ],
+  }
+);
+```
+
+## Advanced Configuration
+
+### Sampling
+
+```typescript
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  
+  // Sample 20% of transactions
+  tracesSampleRate: 0.2,
+  
+  // Or use dynamic sampling
+  tracesSampler: (samplingContext) => {
+    // Don't sample health checks
+    if (samplingContext.request?.url?.includes('/health')) {
+      return 0;
+    }
+    
+    // Sample API routes at 50%
+    if (samplingContext.request?.url?.startsWith('/api')) {
+      return 0.5;
+    }
+    
+    // Default 10%
+    return 0.1;
+  },
+});
+```
+
+### Environment Detection
+
+```typescript
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  environment: process.env.NEXT_PUBLIC_ENVIRONMENT || 'development',
+  enabled: process.env.NODE_ENV === 'production',
+});
+```
+
+### Context
+
+```typescript
+import * as Sentry from '@sentry/nextjs';
+
+// Set user
+Sentry.setUser({
+  id: user.id,
+  email: user.email,
+  username: user.username,
+});
+
+// Set tags
+Sentry.setTag('page', router.pathname);
+
+// Set extra context
+Sentry.setContext('user_preferences', {
+  theme: 'dark',
+  language: 'en',
+});
+```
+
+## Troubleshooting
+
+### Errors Not Captured on Server
+
+1. Ensure `sentry.server.config.ts` exists and is configured
+2. Check that `withSentryConfig` is wrapping your Next.js config
+3. Verify environment variables are set correctly
+
+### Source Maps Not Uploaded
+
+1. Check `SENTRY_AUTH_TOKEN` is set
+2. Ensure `org` and `project` are correct in `next.config.js`
+3. Verify your Sentry auth token has the correct permissions
+
+### Build Errors with Turbopack
+
+1. Update to the latest `@sentry/nextjs` version
+2. Some webpack-specific options don't work with Turbopack
+3. Check Next.js version compatibility
+
+<Warning>
+  For Next.js 16+ with Turbopack, some configuration options related to automatic instrumentation are ignored since Turbopack doesn't support build-time code transformation.
+</Warning>
+
+## Next Steps
+
+- Configure [Error Boundaries](/essentials/error-boundaries)
+- Set up [Session Replay](/essentials/session-replay)
+- Learn about [Performance Monitoring](/essentials/performance-monitoring)
+- Explore [Server Components Monitoring](/essentials/server-components)
+
+## Related Documentation
+
+- [Official Next.js SDK Docs](https://docs.sentry.io/platforms/javascript/guides/nextjs/)
+- [Sentry Next.js Package on npm](https://www.npmjs.com/package/@sentry/nextjs)
+- [Source Code on GitHub](https://github.com/getsentry/sentry-javascript/tree/master/packages/nextjs)

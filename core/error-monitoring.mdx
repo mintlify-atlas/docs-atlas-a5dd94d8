@@ -1,0 +1,176 @@
+---
+title: "Error Monitoring"
+description: "Capture and track errors in your JavaScript application with Sentry"
+---
+
+Error monitoring is the core functionality of Sentry. The SDK automatically captures unhandled errors and allows you to manually capture exceptions with rich context.
+
+## Capturing Exceptions
+
+Use `captureException()` to manually send exceptions to Sentry:
+
+```javascript
+import * as Sentry from '@sentry/browser';
+
+try {
+  riskyOperation();
+} catch (error) {
+  Sentry.captureException(error);
+}
+```
+
+### With Additional Context
+
+Add extra context when capturing exceptions:
+
+```javascript
+Sentry.captureException(error, {
+  level: 'error',
+  tags: {
+    section: 'checkout',
+    payment_method: 'credit_card'
+  },
+  extra: {
+    orderId: '12345',
+    amount: 99.99
+  }
+});
+```
+
+<Note>
+The `captureException` method returns an event ID that you can use to reference the error later.
+</Note>
+
+## Capturing Messages
+
+For non-error events, use `captureMessage()` to send messages to Sentry:
+
+```javascript
+Sentry.captureMessage('User completed onboarding', 'info');
+```
+
+### Severity Levels
+
+Messages support different severity levels:
+
+```javascript
+// Available severity levels
+Sentry.captureMessage('Debug info', 'debug');
+Sentry.captureMessage('General info', 'info');
+Sentry.captureMessage('Warning message', 'warning');
+Sentry.captureMessage('Error occurred', 'error');
+Sentry.captureMessage('Critical failure', 'fatal');
+```
+
+## Capturing Custom Events
+
+For full control, capture custom events with `captureEvent()`:
+
+```javascript
+Sentry.captureEvent({
+  message: 'Custom event',
+  level: 'info',
+  tags: {
+    feature: 'beta',
+    version: '2.0'
+  },
+  user: {
+    id: 'user-123',
+    email: 'user@example.com'
+  },
+  contexts: {
+    custom: {
+      action: 'purchase',
+      item_count: 3
+    }
+  }
+});
+```
+
+## Event IDs
+
+All capture methods return an event ID:
+
+```javascript
+const eventId = Sentry.captureException(error);
+console.log(`Error tracked with ID: ${eventId}`);
+
+// Get the last event ID from the isolation scope
+const lastEventId = Sentry.lastEventId();
+```
+
+<Warning>
+The `lastEventId()` function returns the last recorded error on the current isolation scope. If another error is captured in between, it will return that one instead.
+</Warning>
+
+## Checking SDK Status
+
+Verify that Sentry is properly initialized:
+
+```javascript
+// Check if SDK is initialized
+if (Sentry.isInitialized()) {
+  console.log('Sentry is ready');
+}
+
+// Check if SDK is enabled
+if (Sentry.isEnabled()) {
+  console.log('Sentry is enabled and has a transport');
+}
+```
+
+## Flushing Events
+
+Manually flush pending events:
+
+```javascript
+// Flush with 2 second timeout
+await Sentry.flush(2000);
+
+// Close the SDK and flush all events
+await Sentry.close(2000);
+```
+
+<Tip>
+Use `flush()` before your application exits to ensure all events are sent to Sentry.
+</Tip>
+
+## Error Filtering
+
+Filter errors before they're sent using the `beforeSend` callback:
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  beforeSend(event, hint) {
+    // Don't send errors from localhost
+    if (window.location.hostname === 'localhost') {
+      return null;
+    }
+
+    // Modify the error before sending
+    if (event.exception) {
+      console.log('Error being sent:', hint.originalException);
+    }
+
+    return event;
+  }
+});
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Scopes" icon="layer-group" href="/core/scopes">
+    Learn how to use scopes to add context to events
+  </Card>
+  <Card title="Context" icon="info-circle" href="/core/context">
+    Add rich contextual data to your error reports
+  </Card>
+  <Card title="Breadcrumbs" icon="shoe-prints" href="/core/breadcrumbs">
+    Track user actions leading up to errors
+  </Card>
+  <Card title="Event Processors" icon="filter" href="/api-reference/event-processors">
+    Process and modify events before they're sent
+  </Card>
+</CardGroup>

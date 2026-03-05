@@ -1,0 +1,512 @@
+---
+title: 'Other Frameworks'
+description: 'Install and configure Sentry for other JavaScript frameworks and runtimes'
+---
+
+Sentry supports a wide range of JavaScript frameworks and runtimes beyond the major ones. This guide covers installation for additional platforms.
+
+## Available Packages
+
+The Sentry JavaScript SDK provides packages for many frameworks and runtimes:
+
+- **Astro**: `@sentry/astro`
+- **Solid**: `@sentry/solid`
+- **SolidStart**: `@sentry/solidstart`
+- **Ember**: `@sentry/ember`
+- **Gatsby**: `@sentry/gatsby`
+- **Bun**: `@sentry/bun`
+- **Deno**: `@sentry/deno`
+- **Cloudflare Workers**: `@sentry/cloudflare`
+- **Vercel Edge**: `@sentry/vercel-edge`
+- **AWS Lambda**: `@sentry/aws-serverless`
+- **Google Cloud Functions**: `@sentry/google-cloud-serverless`
+
+## Astro
+
+### Installation
+
+```bash
+npm install @sentry/astro
+```
+
+### Configuration
+
+```typescript
+// astro.config.mjs
+import { defineConfig } from 'astro/config';
+import sentry from '@sentry/astro';
+
+export default defineConfig({
+  integrations: [
+    sentry({
+      dsn: 'YOUR_DSN_HERE',
+      sourceMapsUploadOptions: {
+        org: 'your-org',
+        project: 'your-project',
+        authToken: process.env.SENTRY_AUTH_TOKEN,
+      },
+    }),
+  ],
+});
+```
+
+### Usage
+
+```astro
+---
+import * as Sentry from '@sentry/astro';
+
+try {
+  const data = await fetchData();
+} catch (error) {
+  Sentry.captureException(error);
+}
+---
+
+<div>{data.title}</div>
+```
+
+## Solid
+
+### Installation
+
+```bash
+npm install @sentry/solid
+```
+
+### Configuration
+
+```typescript
+import { render } from 'solid-js/web';
+import * as Sentry from '@sentry/solid';
+import App from './App';
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  
+  integrations: [
+    Sentry.browserTracingIntegration(),
+  ],
+  
+  tracesSampleRate: 1.0,
+});
+
+render(() => <App />, document.getElementById('root'));
+```
+
+### Error Boundary
+
+```typescript
+import { ErrorBoundary } from '@sentry/solid';
+
+function App() {
+  return (
+    <ErrorBoundary fallback={(err) => <div>Error: {err.message}</div>}>
+      <YourApp />
+    </ErrorBoundary>
+  );
+}
+```
+
+## SolidStart
+
+### Installation
+
+```bash
+npm install @sentry/solidstart
+```
+
+### Client Configuration
+
+```typescript
+// entry-client.tsx
+import { mount, StartClient } from '@solidjs/start/client';
+import * as Sentry from '@sentry/solidstart';
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  tracesSampleRate: 1.0,
+});
+
+mount(() => <StartClient />, document.getElementById('app')!);
+```
+
+### Server Configuration
+
+```typescript
+// entry-server.tsx
+import { createHandler, StartServer } from '@solidjs/start/server';
+import * as Sentry from '@sentry/solidstart';
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  tracesSampleRate: 1.0,
+});
+
+export default createHandler(() => (
+  <StartServer
+    document={({ assets, children, scripts }) => (
+      <html lang="en">
+        <head>{assets}</head>
+        <body>
+          {children}
+          {scripts}
+        </body>
+      </html>
+    )}
+  />
+));
+```
+
+## Bun
+
+### Installation
+
+```bash
+bun add @sentry/bun
+```
+
+### Configuration
+
+```typescript
+import * as Sentry from '@sentry/bun';
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  tracesSampleRate: 1.0,
+});
+
+// Your Bun application code
+const server = Bun.serve({
+  port: 3000,
+  fetch(req) {
+    try {
+      return new Response('Hello World');
+    } catch (error) {
+      Sentry.captureException(error);
+      return new Response('Error', { status: 500 });
+    }
+  },
+});
+```
+
+## Deno
+
+### Installation
+
+Import directly from deno.land:
+
+```typescript
+import * as Sentry from 'https://deno.land/x/sentry/index.mjs';
+```
+
+Or use npm specifier:
+
+```typescript
+import * as Sentry from 'npm:@sentry/deno';
+```
+
+### Configuration
+
+```typescript
+import * as Sentry from 'npm:@sentry/deno';
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  tracesSampleRate: 1.0,
+});
+
+Deno.serve((req) => {
+  try {
+    return new Response('Hello World');
+  } catch (error) {
+    Sentry.captureException(error);
+    return new Response('Error', { status: 500 });
+  }
+});
+```
+
+## Cloudflare Workers
+
+### Installation
+
+```bash
+npm install @sentry/cloudflare
+```
+
+### Configuration
+
+```typescript
+import * as Sentry from '@sentry/cloudflare';
+
+export interface Env {
+  SENTRY_DSN: string;
+}
+
+export default {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    Sentry.init({
+      dsn: env.SENTRY_DSN,
+      tracesSampleRate: 1.0,
+    });
+    
+    try {
+      return new Response('Hello World');
+    } catch (error) {
+      Sentry.captureException(error);
+      return new Response('Error', { status: 500 });
+    }
+  },
+};
+```
+
+### With Hono
+
+```typescript
+import { Hono } from 'hono';
+import * as Sentry from '@sentry/cloudflare';
+
+const app = new Hono();
+
+app.use('*', async (c, next) => {
+  Sentry.init({
+    dsn: c.env.SENTRY_DSN,
+    tracesSampleRate: 1.0,
+  });
+  
+  await next();
+});
+
+app.get('/', (c) => {
+  return c.text('Hello World');
+});
+
+export default app;
+```
+
+## AWS Lambda
+
+### Installation
+
+```bash
+npm install @sentry/aws-serverless
+```
+
+### Configuration
+
+```typescript
+import * as Sentry from '@sentry/aws-serverless';
+import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  tracesSampleRate: 1.0,
+});
+
+export const handler = Sentry.wrapHandler(
+  async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
+    try {
+      // Your Lambda code
+      return {
+        statusCode: 200,
+        body: JSON.stringify({ message: 'Success' }),
+      };
+    } catch (error) {
+      Sentry.captureException(error);
+      throw error;
+    }
+  }
+);
+```
+
+## Google Cloud Functions
+
+### Installation
+
+```bash
+npm install @sentry/google-cloud-serverless
+```
+
+### Configuration
+
+```typescript
+import * as Sentry from '@sentry/google-cloud-serverless';
+import type { HttpFunction } from '@google-cloud/functions-framework';
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  tracesSampleRate: 1.0,
+});
+
+export const helloWorld: HttpFunction = Sentry.wrapHttpFunction(
+  (req, res) => {
+    try {
+      res.send('Hello World');
+    } catch (error) {
+      Sentry.captureException(error);
+      res.status(500).send('Error');
+    }
+  }
+);
+```
+
+## Ember
+
+### Installation
+
+```bash
+npm install @sentry/ember
+```
+
+### Configuration
+
+```javascript
+// app/instance-initializers/sentry.js
+import * as Sentry from '@sentry/ember';
+
+export function initialize() {
+  Sentry.init({
+    dsn: 'YOUR_DSN_HERE',
+    tracesSampleRate: 1.0,
+  });
+}
+
+export default {
+  initialize,
+};
+```
+
+## Gatsby
+
+### Installation
+
+```bash
+npm install @sentry/gatsby
+```
+
+### Configuration
+
+```javascript
+// gatsby-config.js
+module.exports = {
+  plugins: [
+    {
+      resolve: '@sentry/gatsby',
+      options: {
+        dsn: 'YOUR_DSN_HERE',
+        tracesSampleRate: 1.0,
+        sampleRate: 1.0,
+      },
+    },
+  ],
+};
+```
+
+## Generic JavaScript
+
+For frameworks not listed here, you can use the base browser or Node.js SDK:
+
+### Browser
+
+```bash
+npm install @sentry/browser
+```
+
+```javascript
+import * as Sentry from '@sentry/browser';
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  tracesSampleRate: 1.0,
+});
+```
+
+### Node.js
+
+```bash
+npm install @sentry/node
+```
+
+```javascript
+import * as Sentry from '@sentry/node';
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  tracesSampleRate: 1.0,
+});
+```
+
+## Common Patterns
+
+### Capturing Errors
+
+All SDKs share the same API for capturing errors:
+
+```typescript
+import * as Sentry from '@sentry/<package>';
+
+try {
+  someFunctionThatMightFail();
+} catch (error) {
+  Sentry.captureException(error);
+}
+```
+
+### Setting Context
+
+```typescript
+// Set user
+Sentry.setUser({ id: '123', email: 'user@example.com' });
+
+// Set tags
+Sentry.setTag('environment', 'production');
+
+// Set extra context
+Sentry.setExtra('metadata', { key: 'value' });
+```
+
+### Performance Monitoring
+
+```typescript
+const result = await Sentry.startSpan(
+  { name: 'my-operation', op: 'function' },
+  async () => {
+    return await myExpensiveOperation();
+  }
+);
+```
+
+## Framework-Specific Documentation
+
+For detailed documentation on each framework:
+
+- [Astro Docs](https://docs.sentry.io/platforms/javascript/guides/astro/)
+- [Solid Docs](https://docs.sentry.io/platforms/javascript/guides/solid/)
+- [SolidStart Docs](https://docs.sentry.io/platforms/javascript/guides/solidstart/)
+- [Bun Docs](https://docs.sentry.io/platforms/javascript/guides/bun/)
+- [Deno Docs](https://docs.sentry.io/platforms/javascript/guides/deno/)
+- [Cloudflare Docs](https://docs.sentry.io/platforms/javascript/guides/cloudflare/)
+- [AWS Lambda Docs](https://docs.sentry.io/platforms/javascript/guides/aws-lambda/)
+- [Google Cloud Functions Docs](https://docs.sentry.io/platforms/javascript/guides/gcp-functions/)
+
+## Need Help?
+
+If your framework isn't listed:
+
+1. Check the [official Sentry documentation](https://docs.sentry.io/platforms/javascript/)
+2. Use the base `@sentry/browser` or `@sentry/node` SDK
+3. Reach out on the [Sentry Discord](https://discord.gg/Ww9hbqr)
+4. Search [Stack Overflow](https://stackoverflow.com/questions/tagged/sentry)
+
+## Next Steps
+
+- Learn about [Error Handling](/essentials/error-handling)
+- Configure [Performance Monitoring](/essentials/performance-monitoring)
+- Set up [Source Maps](/essentials/source-maps)
+- Explore [Custom Instrumentation](/essentials/custom-instrumentation)
+
+## Related Resources
+
+- [Sentry JavaScript SDK on GitHub](https://github.com/getsentry/sentry-javascript)
+- [All Sentry Packages on npm](https://www.npmjs.com/search?q=%40sentry)
+- [Official Documentation](https://docs.sentry.io/platforms/javascript/)

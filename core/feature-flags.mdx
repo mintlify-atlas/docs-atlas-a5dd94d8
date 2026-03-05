@@ -1,0 +1,460 @@
+---
+title: "Feature Flags"
+description: "Track feature flag evaluations and their impact on errors and performance"
+---
+
+Sentry's feature flag tracking helps you understand how feature flags correlate with errors and performance issues, making it easier to identify problematic feature rollouts.
+
+## Setup
+
+Enable feature flag tracking with the integration:
+
+```javascript
+import * as Sentry from '@sentry/browser';
+
+Sentry.init({
+  dsn: 'your-dsn',
+  integrations: [
+    Sentry.featureFlagsIntegration()
+  ]
+});
+```
+
+<Note>
+The feature flags integration automatically tracks flag evaluations and includes them with error events and spans.
+</Note>
+
+## Recording Flag Evaluations
+
+Manually record feature flag evaluations:
+
+```javascript
+import { recordFeatureFlag } from '@sentry/browser';
+
+// Record a flag evaluation
+recordFeatureFlag('new-checkout', true);
+
+// Use the flag in your code
+if (flags.newCheckout) {
+  renderNewCheckout();
+} else {
+  renderOldCheckout();
+}
+```
+
+### Recording Multiple Flags
+
+```javascript
+import { recordFeatureFlag } from '@sentry/browser';
+
+// Record multiple flags
+recordFeatureFlag('dark-mode', true);
+recordFeatureFlag('beta-features', false);
+recordFeatureFlag('new-dashboard', true);
+```
+
+## Integration with Feature Flag Services
+
+### LaunchDarkly
+
+```javascript
+import * as Sentry from '@sentry/browser';
+import * as LDClient from 'launchdarkly-js-client-sdk';
+
+// Initialize Sentry
+Sentry.init({
+  dsn: 'your-dsn',
+  integrations: [Sentry.featureFlagsIntegration()]
+});
+
+// Initialize LaunchDarkly
+const ldClient = LDClient.initialize('your-client-id', {
+  key: 'user-key'
+});
+
+await ldClient.waitForInitialization();
+
+// Record all flag evaluations
+ldClient.on('change', (settings) => {
+  Object.entries(settings).forEach(([flagKey, flagValue]) => {
+    Sentry.recordFeatureFlag(flagKey, flagValue.current);
+  });
+});
+
+// Or record on each evaluation
+function getFlagValue(flagKey, defaultValue) {
+  const value = ldClient.variation(flagKey, defaultValue);
+  Sentry.recordFeatureFlag(flagKey, value);
+  return value;
+}
+```
+
+### Split.io
+
+```javascript
+import * as Sentry from '@sentry/browser';
+import { SplitFactory } from '@splitsoftware/splitio';
+
+Sentry.init({
+  dsn: 'your-dsn',
+  integrations: [Sentry.featureFlagsIntegration()]
+});
+
+const factory = SplitFactory({
+  core: {
+    authorizationKey: 'your-api-key'
+  }
+});
+
+const client = factory.client();
+
+await client.ready();
+
+// Wrap getTreatment to record flags
+const originalGetTreatment = client.getTreatment.bind(client);
+client.getTreatment = function(splitName) {
+  const treatment = originalGetTreatment(splitName);
+  Sentry.recordFeatureFlag(splitName, treatment === 'on');
+  return treatment;
+};
+```
+
+### GrowthBook
+
+Sentry provides built-in GrowthBook integration:
+
+```javascript
+import * as Sentry from '@sentry/browser';
+import { GrowthBook } from '@growthbook/growthbook';
+
+Sentry.init({
+  dsn: 'your-dsn',
+  integrations: [
+    // Automatic GrowthBook tracking
+    Sentry.growthbookIntegration()
+  ]
+});
+
+// Initialize GrowthBook
+const growthbook = new GrowthBook({
+  apiHost: 'https://cdn.growthbook.io',
+  clientKey: 'your-client-key'
+});
+
+await growthbook.loadFeatures();
+
+// Flags are automatically tracked
+const showNewFeature = growthbook.isOn('new-feature');
+```
+
+<Tip>
+Use the GrowthBook integration for automatic flag tracking without manual instrumentation.
+</Tip>
+
+## Feature Flag Context
+
+Flags are automatically added to error and performance events:
+
+```javascript
+import { recordFeatureFlag } from '@sentry/browser';
+
+// Record flags
+recordFeatureFlag('new-checkout', true);
+recordFeatureFlag('discount-banner', false);
+
+try {
+  // Error will include flag context
+  processCheckout();
+} catch (error) {
+  Sentry.captureException(error);
+  // Error in Sentry shows:
+  // Flags: { new-checkout: true, discount-banner: false }
+}
+```
+
+## Flags on Spans
+
+Flags are also attached to performance spans:
+
+```javascript
+import { recordFeatureFlag } from '@sentry/browser';
+
+Sentry.startSpan({ name: 'load_dashboard', op: 'ui.load' }, () => {
+  // Record flag evaluation
+  const useNewDashboard = getFeatureFlag('new-dashboard');
+  recordFeatureFlag('new-dashboard', useNewDashboard);
+  
+  if (useNewDashboard) {
+    loadNewDashboard();
+  } else {
+    loadOldDashboard();
+  }
+});
+// Span includes: flag.evaluation.new-dashboard: true
+```
+
+<Note>
+Up to 10 unique flags per span are recorded. Additional flags are silently dropped.
+</Note>
+
+## Flag Buffer
+
+Sentry maintains a buffer of the last 100 flag evaluations:
+
+```javascript
+// These flags are tracked in order
+recordFeatureFlag('flag-1', true);
+recordFeatureFlag('flag-2', false);
+recordFeatureFlag('flag-3', true);
+// ... (up to 100 flags)
+
+// When an error occurs, all 100 flags are included
+Sentry.captureException(error);
+```
+
+### Flag Buffer Behavior
+
+- **LRU (Least Recently Used)**: Old flags are removed when buffer is full
+- **Unique flags**: Re-evaluating a flag updates its value
+- **Ordered**: Flags are sorted by recency
+
+## Practical Examples
+
+### A/B Testing
+
+```javascript
+import { recordFeatureFlag } from '@sentry/browser';
+
+function getExperimentVariant(experimentName) {
+  const variant = abTestingService.getVariant(experimentName);
+  
+  // Record the variant as a flag
+  recordFeatureFlag(`experiment.${experimentName}`, variant);
+  
+  return variant;
+}
+
+// Use in code
+const checkoutVariant = getExperimentVariant('checkout-flow');
+
+if (checkoutVariant === 'variant-b') {
+  renderCheckoutB();
+} else {
+  renderCheckoutA();
+}
+```
+
+### Progressive Rollout
+
+```javascript
+import { recordFeatureFlag } from '@sentry/browser';
+
+function shouldEnableFeature(featureName, rolloutPercent) {
+  const userId = getCurrentUser().id;
+  const hash = hashCode(userId + featureName);
+  const enabled = (hash % 100) < rolloutPercent;
+  
+  // Record for Sentry
+  recordFeatureFlag(featureName, enabled);
+  
+  return enabled;
+}
+
+// 10% rollout
+const newFeatureEnabled = shouldEnableFeature('new-search', 10);
+
+if (newFeatureEnabled) {
+  // New feature code
+  // If this crashes, Sentry knows the flag was enabled
+}
+```
+
+### Feature Gating
+
+```javascript
+import { recordFeatureFlag } from '@sentry/browser';
+
+function checkFeatureAccess(feature) {
+  const user = getCurrentUser();
+  const hasAccess = user.plan === 'premium' || user.betaFeatures;
+  
+  recordFeatureFlag(`feature.${feature}.access`, hasAccess);
+  
+  return hasAccess;
+}
+
+if (checkFeatureAccess('advanced-analytics')) {
+  showAdvancedAnalytics();
+} else {
+  showUpgradePrompt();
+}
+```
+
+### Conditional Features
+
+```javascript
+import { recordFeatureFlag } from '@sentry/browser';
+
+function evaluateFeatureFlags() {
+  const user = getCurrentUser();
+  const environment = getEnvironment();
+  
+  const flags = {
+    darkMode: user.preferences.darkMode,
+    betaFeatures: user.betaAccess && environment === 'staging',
+    newDashboard: environment === 'production' || user.betaAccess,
+    aiFeatures: user.plan === 'enterprise'
+  };
+  
+  // Record all flags
+  Object.entries(flags).forEach(([key, value]) => {
+    recordFeatureFlag(key, value);
+  });
+  
+  return flags;
+}
+
+const flags = evaluateFeatureFlags();
+```
+
+## Analyzing Flag Impact
+
+In Sentry, you can:
+
+1. **Filter issues by flags**: See errors that occurred when a flag was enabled
+2. **Compare performance**: Measure performance impact of flags
+3. **Correlate with releases**: Track flag changes across releases
+4. **Group by flags**: Aggregate errors by flag combinations
+
+### Example Queries
+
+```
+// Errors where new-checkout was enabled
+flag.new-checkout:true
+
+// Performance issues with beta features
+flag.beta-features:true AND transaction.duration:>1s
+
+// Compare error rates
+flag.new-dashboard:true vs flag.new-dashboard:false
+```
+
+## Best Practices
+
+1. **Record early**: Track flags before using them
+2. **Use descriptive names**: Clear flag names help debugging
+3. **Track all evaluations**: Record flags even if they're false
+4. **Include experiments**: Track A/B test variants as flags
+5. **Clean up old flags**: Remove tracking for deprecated flags
+6. **Monitor flag impact**: Watch error rates when enabling flags
+
+## Custom Integration
+
+Create a wrapper for your feature flag service:
+
+```javascript
+import { recordFeatureFlag } from '@sentry/browser';
+
+class FeatureFlagManager {
+  constructor(flagService) {
+    this.flagService = flagService;
+  }
+  
+  isEnabled(flagName, defaultValue = false) {
+    const value = this.flagService.getValue(flagName, defaultValue);
+    
+    // Automatically record in Sentry
+    recordFeatureFlag(flagName, value);
+    
+    return value;
+  }
+  
+  getVariant(experimentName) {
+    const variant = this.flagService.getVariant(experimentName);
+    
+    // Record experiment variant
+    recordFeatureFlag(`experiment.${experimentName}`, variant);
+    
+    return variant;
+  }
+}
+
+// Use throughout app
+const flags = new FeatureFlagManager(yourFlagService);
+
+if (flags.isEnabled('new-feature')) {
+  // Feature code
+}
+```
+
+## TypeScript Support
+
+```typescript
+import { recordFeatureFlag } from '@sentry/browser';
+
+type FeatureFlag = 'new-checkout' | 'dark-mode' | 'beta-features';
+
+function recordFlag(flag: FeatureFlag, value: boolean): void {
+  recordFeatureFlag(flag, value);
+}
+
+// Type-safe flag recording
+recordFlag('new-checkout', true);
+// recordFlag('invalid-flag', true); // TypeScript error
+```
+
+## Troubleshooting
+
+### Flags Not Appearing
+
+```javascript
+// Check integration is loaded
+import { getClient } from '@sentry/browser';
+
+const client = getClient();
+const integration = client?.getIntegrationByName('FeatureFlags');
+
+if (!integration) {
+  console.error('Feature flags integration not found');
+}
+
+// Check flags are being recorded
+import { getCurrentScope } from '@sentry/browser';
+
+const scope = getCurrentScope();
+const context = scope.getScopeData().contexts.flags;
+console.log('Recorded flags:', context?.values);
+```
+
+### Too Many Flags
+
+```javascript
+// Only record important flags
+function shouldRecordFlag(flagName) {
+  const importantFlags = ['new-checkout', 'payment-provider', 'ab-test-variant'];
+  return importantFlags.includes(flagName);
+}
+
+function recordFlagConditionally(flagName, value) {
+  if (shouldRecordFlag(flagName)) {
+    recordFeatureFlag(flagName, value);
+  }
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Error Monitoring" icon="bug" href="/core/error-monitoring">
+    See how flags impact errors
+  </Card>
+  <Card title="Performance" icon="gauge" href="/core/performance">
+    Measure flag performance impact
+  </Card>
+  <Card title="Context" icon="info-circle" href="/core/context">
+    Learn about context data
+  </Card>
+  <Card title="User Feedback" icon="comment" href="/core/user-feedback">
+    Collect feedback on new features
+  </Card>
+</CardGroup>

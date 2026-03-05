@@ -1,0 +1,345 @@
+---
+title: 'Dedupe Integration'
+description: 'Prevent duplicate error events from being sent to Sentry'
+---
+
+The Dedupe integration prevents duplicate error events from being sent to Sentry by comparing the current event with the previously captured event.
+
+## Installation
+
+This integration is **enabled by default** in all Sentry SDKs.
+
+```javascript
+import * as Sentry from '@sentry/node';
+
+Sentry.init({
+  dsn: 'your-dsn',
+  // dedupeIntegration is included by default
+});
+```
+
+## How It Works
+
+The integration compares consecutive error events and drops duplicates based on:
+
+1. **Message events**: Same error message, stacktrace, and fingerprint
+2. **Exception events**: Same exception type, value, stacktrace, and fingerprint
+
+<Steps>
+  <Step title="Event Captured">
+    A new error event is captured
+  </Step>
+  
+  <Step title="Compare with Previous">
+    The integration compares it with the last captured event
+  </Step>
+  
+  <Step title="Check Duplicates">
+    Matches are checked for:
+    - Exception type and value
+    - Error message
+    - Stacktrace (filename, line, column, function)
+    - Fingerprint
+  </Step>
+  
+  <Step title="Drop or Send">
+    If it's a duplicate, the event is dropped. Otherwise, it's sent to Sentry.
+  </Step>
+</Steps>
+
+## What Gets Deduped
+
+### Duplicate Exception Events
+
+The same error thrown multiple times in quick succession:
+
+```javascript
+// This will only send one event to Sentry
+for (let i = 0; i < 3; i++) {
+  try {
+    throw new TypeError('User is not defined');
+  } catch (error) {
+    Sentry.captureException(error);
+  }
+}
+```
+
+### Duplicate Message Events
+
+The same error message captured repeatedly:
+
+```javascript
+// Only the first message is sent
+Sentry.captureMessage('Failed to load resource');
+Sentry.captureMessage('Failed to load resource');
+Sentry.captureMessage('Failed to load resource');
+```
+
+## What Doesn't Get Deduped
+
+### Different Error Types
+
+```javascript
+// Both events are sent (different exception types)
+try {
+  throw new TypeError('Invalid type');
+} catch (error) {
+  Sentry.captureException(error);
+}
+
+try {
+  throw new RangeError('Invalid type');
+} catch (error) {
+  Sentry.captureException(error);
+}
+```
+
+### Different Stacktraces
+
+```javascript
+function errorA() {
+  throw new Error('Failure');
+}
+
+function errorB() {
+  throw new Error('Failure');
+}
+
+try {
+  errorA(); // Different stacktrace
+} catch (error) {
+  Sentry.captureException(error);
+}
+
+try {
+  errorB(); // Different stacktrace
+} catch (error) {
+  Sentry.captureException(error);
+}
+// Both events are sent (different call sites)
+```
+
+### Non-Error Events
+
+Transactions, replays, and other event types are never deduped:
+
+```javascript
+// Both transactions are sent
+Sentry.startSpan({ name: 'task' }, () => {
+  // work
+});
+
+Sentry.startSpan({ name: 'task' }, () => {
+  // work
+});
+```
+
+## Comparison Logic
+
+The integration performs detailed comparison:
+
+### Message Comparison
+
+```javascript
+function isSameMessageEvent(currentEvent, previousEvent) {
+  // Must have same message
+  if (currentEvent.message !== previousEvent.message) {
+    return false;
+  }
+  
+  // Must have same fingerprint (if present)
+  if (!isSameFingerprint(currentEvent, previousEvent)) {
+    return false;
+  }
+  
+  // Must have same stacktrace
+  if (!isSameStacktrace(currentEvent, previousEvent)) {
+    return false;
+  }
+  
+  return true;
+}
+```
+
+### Exception Comparison
+
+```javascript
+function isSameExceptionEvent(currentEvent, previousEvent) {
+  // Must have same exception type and value
+  if (
+    previousException.type !== currentException.type ||
+    previousException.value !== currentException.value
+  ) {
+    return false;
+  }
+  
+  // Must have same fingerprint (if present)
+  // Must have same stacktrace
+  return isSameFingerprint(...) && isSameStacktrace(...);
+}
+```
+
+### Stacktrace Comparison
+
+All stack frames must match exactly:
+
+```javascript
+// Compares for each frame:
+- filename
+- line number (lineno)
+- column number (colno)
+- function name
+```
+
+## Disabling Dedupe
+
+If you want to disable deduplication:
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  integrations: integrations => {
+    return integrations.filter(integration => {
+      return integration.name !== 'Dedupe';
+    });
+  },
+});
+```
+
+<Warning>
+  Disabling dedupe may result in significantly more events being sent to Sentry, potentially affecting your quota.
+</Warning>
+
+## Deduplication Scope
+
+The integration only compares with the **immediately previous event**:
+
+```javascript
+// Event 1: Error A
+Sentry.captureException(new Error('A'));
+
+// Event 2: Error A (dropped - duplicate of Event 1)
+Sentry.captureException(new Error('A'));
+
+// Event 3: Error B (sent - different from Event 2)
+Sentry.captureException(new Error('B'));
+
+// Event 4: Error A (sent - not compared with Event 1, only Event 3)
+Sentry.captureException(new Error('A'));
+```
+
+## Custom Fingerprinting
+
+Use custom fingerprints to control deduplication:
+
+```javascript
+// These will NOT be deduped (different fingerprints)
+Sentry.captureException(error, {
+  fingerprint: ['error', 'user-123'],
+});
+
+Sentry.captureException(error, {
+  fingerprint: ['error', 'user-456'],
+});
+
+// These WILL be deduped (same fingerprint and error)
+Sentry.captureException(error, {
+  fingerprint: ['custom-group'],
+});
+
+Sentry.captureException(error, {
+  fingerprint: ['custom-group'],
+});
+```
+
+## Source Code
+
+The Dedupe integration is implemented in:
+
+`packages/core/src/integrations/dedupe.ts:12`
+
+## Practical Examples
+
+### Event Loop Errors
+
+Prevents flooding from errors in event handlers:
+
+```javascript
+// Without dedupe: could send hundreds of events
+window.addEventListener('scroll', () => {
+  try {
+    processScroll();
+  } catch (error) {
+    Sentry.captureException(error);
+  }
+});
+```
+
+### Retry Logic
+
+Avoids duplicate reports during retries:
+
+```javascript
+async function fetchWithRetry(url, maxRetries = 3) {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await fetch(url);
+    } catch (error) {
+      // Only the first error is sent
+      Sentry.captureException(error);
+      
+      if (i === maxRetries - 1) {
+        throw error;
+      }
+    }
+  }
+}
+```
+
+### Polling Operations
+
+Prevents duplicate errors from periodic operations:
+
+```javascript
+setInterval(() => {
+  try {
+    syncData();
+  } catch (error) {
+    // Deduped if same error occurs repeatedly
+    Sentry.captureException(error);
+  }
+}, 5000);
+```
+
+## Limitations
+
+1. **Only compares with previous event**: Not a global deduplication across all events
+2. **Requires exact match**: Small differences in stacktrace will bypass dedupe
+3. **No time-based window**: Doesn't aggregate errors over time
+
+## Best Practices
+
+<Tip>
+  Combine dedupe with custom fingerprinting for better error grouping
+</Tip>
+
+1. **Let dedupe work automatically**: It's designed to handle common duplicate scenarios
+2. **Use fingerprinting for logical grouping**: Dedupe handles technical duplicates
+3. **Monitor your error volume**: Unusual spikes might indicate dedupe isn't catching something
+
+## Debugging
+
+To see when events are deduped, enable debug mode:
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  debug: true, // Logs "Event dropped due to being a duplicate"
+});
+```
+
+## Related
+
+- [Event Filters](/integrations/event-filters) - Filter unwanted events
+- [Fingerprinting](https://docs.sentry.io/platforms/javascript/usage/sdk-fingerprinting/) - Custom error grouping
+- [Sampling](https://docs.sentry.io/platforms/javascript/configuration/sampling/) - Reduce event volume

@@ -1,0 +1,449 @@
+---
+title: 'Vercel AI SDK Integration'
+description: 'Monitor ai library function calls and streaming responses'
+---
+
+The Vercel AI SDK integration adds tracing support for the [`ai` library](https://www.npmjs.com/package/ai) from Vercel.
+
+<Note>
+  This integration is **not enabled by default**. You must manually add it to your Sentry configuration.
+</Note>
+
+## Installation
+
+<Steps>
+  <Step title="Add the Integration">
+    ```javascript
+    import * as Sentry from '@sentry/node';
+
+    Sentry.init({
+      dsn: 'your-dsn',
+      integrations: [
+        Sentry.vercelAIIntegration(),
+      ],
+    });
+    ```
+  </Step>
+  
+  <Step title="Enable Telemetry Per Call">
+    You must opt-in to telemetry for each AI function call:
+
+    ```javascript
+    import { generateText } from 'ai';
+    import { openai } from '@ai-sdk/openai';
+
+    const result = await generateText({
+      model: openai('gpt-4'),
+      prompt: 'What is the capital of France?',
+      experimental_telemetry: { isEnabled: true },
+    });
+    ```
+  </Step>
+</Steps>
+
+## Basic Usage
+
+### Generate Text
+
+```javascript
+import { generateText } from 'ai';
+import { openai } from '@ai-sdk/openai';
+
+const result = await generateText({
+  model: openai('gpt-4'),
+  prompt: 'Explain quantum computing',
+  experimental_telemetry: { isEnabled: true },
+});
+
+console.log(result.text);
+```
+
+### Stream Text
+
+```javascript
+import { streamText } from 'ai';
+import { openai } from '@ai-sdk/openai';
+
+const { textStream } = await streamText({
+  model: openai('gpt-4'),
+  prompt: 'Tell me a story',
+  experimental_telemetry: { isEnabled: true },
+});
+
+for await (const textPart of textStream) {
+  process.stdout.write(textPart);
+}
+```
+
+### Generate Object
+
+```javascript
+import { generateObject } from 'ai';
+import { openai } from '@ai-sdk/openai';
+import { z } from 'zod';
+
+const result = await generateObject({
+  model: openai('gpt-4'),
+  schema: z.object({
+    name: z.string(),
+    age: z.number(),
+    city: z.string(),
+  }),
+  prompt: 'Generate a random person',
+  experimental_telemetry: { isEnabled: true },
+});
+
+console.log(result.object);
+```
+
+## Capturing Inputs and Outputs
+
+To capture prompts and responses, you must **opt-in per function call**:
+
+```javascript
+const result = await generateText({
+  model: openai('gpt-4'),
+  prompt: 'What is AI?',
+  experimental_telemetry: {
+    isEnabled: true,
+    recordInputs: true,  // Capture prompt
+    recordOutputs: true, // Capture response
+  },
+});
+```
+
+<Warning>
+  Unlike other AI integrations, `sendDefaultPii` does **not** affect the Vercel AI integration. You must explicitly set `recordInputs` and `recordOutputs` in each function call.
+</Warning>
+
+## Configuration
+
+### Integration Options
+
+<ParamField path="force" type="boolean" default="auto-detected">
+  Force the integration to be enabled even if the `ai` package is not detected
+</ParamField>
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  integrations: [
+    Sentry.vercelAIIntegration({
+      force: true, // Always enable, even if 'ai' package not detected
+    }),
+  ],
+});
+```
+
+### Per-Call Telemetry Options
+
+<ParamField path="experimental_telemetry.isEnabled" type="boolean" default="false">
+  Enable telemetry for this specific call
+</ParamField>
+
+<ParamField path="experimental_telemetry.recordInputs" type="boolean" default="false">
+  Capture input prompts for this call
+</ParamField>
+
+<ParamField path="experimental_telemetry.recordOutputs" type="boolean" default="false">
+  Capture output responses for this call
+</ParamField>
+
+## Supported Functions
+
+The integration supports all main `ai` library functions:
+
+### Text Generation
+
+- `generateText()` - Generate text completion
+- `streamText()` - Stream text completion
+
+### Structured Output
+
+- `generateObject()` - Generate structured data
+- `streamObject()` - Stream structured data
+
+### Embeddings
+
+- `embed()` - Generate single embedding
+- `embedMany()` - Generate multiple embeddings
+
+## Practical Examples
+
+### Chat Application
+
+```javascript
+import * as Sentry from '@sentry/node';
+import { streamText } from 'ai';
+import { openai } from '@ai-sdk/openai';
+
+async function chat(messages) {
+  return await Sentry.startSpan(
+    { name: 'Chat', op: 'ai.chat' },
+    async () => {
+      const { textStream } = await streamText({
+        model: openai('gpt-4'),
+        messages,
+        experimental_telemetry: {
+          isEnabled: true,
+          recordInputs: true,
+          recordOutputs: true,
+        },
+      });
+      
+      return textStream;
+    }
+  );
+}
+```
+
+### Data Extraction
+
+```javascript
+import { generateObject } from 'ai';
+import { openai } from '@ai-sdk/openai';
+import { z } from 'zod';
+
+const schema = z.object({
+  name: z.string(),
+  email: z.string().email(),
+  phone: z.string().optional(),
+  company: z.string().optional(),
+});
+
+async function extractContact(text) {
+  const result = await generateObject({
+    model: openai('gpt-4'),
+    schema,
+    prompt: `Extract contact information from: ${text}`,
+    experimental_telemetry: {
+      isEnabled: true,
+      recordInputs: false,  // Don't record potentially sensitive input
+      recordOutputs: false, // Don't record extracted data
+    },
+  });
+  
+  return result.object;
+}
+```
+
+### Content Moderation
+
+```javascript
+import { generateObject } from 'ai';
+import { openai } from '@ai-sdk/openai';
+import { z } from 'zod';
+
+const moderationSchema = z.object({
+  isSafe: z.boolean(),
+  categories: z.array(z.string()),
+  reason: z.string(),
+});
+
+async function moderateContent(content) {
+  return await Sentry.startSpan(
+    { name: 'Moderate Content', op: 'ai.moderation' },
+    async () => {
+      const result = await generateObject({
+        model: openai('gpt-4'),
+        schema: moderationSchema,
+        prompt: `Moderate this content for safety: ${content}`,
+        experimental_telemetry: {
+          isEnabled: true,
+          recordInputs: true,
+          recordOutputs: true,
+        },
+      });
+      
+      return result.object;
+    }
+  );
+}
+```
+
+### Semantic Search
+
+```javascript
+import { embedMany } from 'ai';
+import { openai } from '@ai-sdk/openai';
+
+async function searchDocuments(query, documents) {
+  return await Sentry.startSpan(
+    { name: 'Semantic Search', op: 'ai.search' },
+    async () => {
+      // Embed query and documents
+      const { embeddings } = await embedMany({
+        model: openai.embedding('text-embedding-ada-002'),
+        values: [query, ...documents.map(d => d.text)],
+        experimental_telemetry: { isEnabled: true },
+      });
+      
+      const [queryEmbedding, ...docEmbeddings] = embeddings;
+      
+      // Calculate similarity
+      const results = documents.map((doc, i) => ({
+        ...doc,
+        similarity: cosineSimilarity(queryEmbedding, docEmbeddings[i]),
+      }));
+      
+      return results.sort((a, b) => b.similarity - a.similarity);
+    }
+  );
+}
+```
+
+### Multi-Step Agent
+
+```javascript
+import { generateText } from 'ai';
+import { openai } from '@ai-sdk/openai';
+
+async function multiStepAgent(task) {
+  return await Sentry.startSpan(
+    { name: 'Multi-Step Agent', op: 'ai.agent' },
+    async () => {
+      // Step 1: Plan
+      const plan = await generateText({
+        model: openai('gpt-4'),
+        prompt: `Create a plan to accomplish: ${task}`,
+        experimental_telemetry: { isEnabled: true, recordOutputs: true },
+      });
+      
+      // Step 2: Execute
+      const execution = await generateText({
+        model: openai('gpt-4'),
+        prompt: `Execute this plan:\n${plan.text}`,
+        experimental_telemetry: { isEnabled: true, recordOutputs: true },
+      });
+      
+      // Step 3: Review
+      const review = await generateText({
+        model: openai('gpt-4'),
+        prompt: `Review this execution:\n${execution.text}`,
+        experimental_telemetry: { isEnabled: true, recordOutputs: true },
+      });
+      
+      return review.text;
+    }
+  );
+}
+```
+
+## Platform Support
+
+| Platform | Support |
+|----------|--------|
+| Node.js | ✓ Automatic |
+| Edge Runtime | ✓ Automatic |
+| Browser | ❌ Not supported |
+
+## Viewing Data in Sentry
+
+Vercel AI operations appear as spans in traces:
+
+```
+Transaction: POST /api/generate
+├─ ai.generateText
+│  ├─ Model: gpt-4
+│  ├─ Tokens: 50 prompt + 200 completion
+│  └─ Duration: 1.8s
+└─ Total: 1.8s
+```
+
+## Performance Monitoring
+
+- **Response Times**: Track AI function call latency
+- **Token Usage**: Monitor token consumption
+- **Error Rates**: Identify failed AI calls
+- **Model Performance**: Compare different models
+
+## Source Code
+
+The Vercel AI integration is implemented in:
+
+`packages/node/src/integrations/tracing/vercelai/index.ts:19`
+
+## Privacy Best Practices
+
+<Tip>
+  Only enable `recordInputs` and `recordOutputs` for non-sensitive use cases.
+</Tip>
+
+### Selective Recording
+
+```javascript
+const isSensitive = content.includes('password');
+
+const result = await generateText({
+  model: openai('gpt-4'),
+  prompt: content,
+  experimental_telemetry: {
+    isEnabled: true,
+    recordInputs: !isSensitive,
+    recordOutputs: !isSensitive,
+  },
+});
+```
+
+### Filter Sensitive Data
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  
+  beforeSendSpan(span) {
+    if (span.op?.startsWith('ai.')) {
+      // Remove PII from AI spans
+      const attributes = span.attributes || {};
+      for (const key in attributes) {
+        if (typeof attributes[key] === 'string') {
+          attributes[key] = attributes[key]
+            .replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g, '[EMAIL]');
+        }
+      }
+    }
+    return span;
+  },
+});
+```
+
+## Troubleshooting
+
+### Spans Not Appearing
+
+Ensure you've added the integration:
+
+```javascript
+Sentry.init({
+  integrations: [Sentry.vercelAIIntegration()],
+});
+```
+
+### Telemetry Not Captured
+
+Ensure `experimental_telemetry.isEnabled: true` is set:
+
+```javascript
+const result = await generateText({
+  // ...
+  experimental_telemetry: { isEnabled: true },
+});
+```
+
+### Missing Input/Output Data
+
+Explicitly enable recording:
+
+```javascript
+experimental_telemetry: {
+  isEnabled: true,
+  recordInputs: true,
+  recordOutputs: true,
+}
+```
+
+## Related
+
+- [AI Monitoring Overview](/integrations/ai/overview)
+- [OpenAI Integration](/integrations/ai/openai)
+- [Vercel AI SDK Documentation](https://sdk.vercel.ai/docs/ai-sdk-core/telemetry)

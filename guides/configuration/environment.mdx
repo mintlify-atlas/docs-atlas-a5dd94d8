@@ -1,0 +1,331 @@
+---
+title: Environment Configuration
+description: Configure Sentry for different deployment environments
+---
+
+Properly configuring environments helps you organize issues, filter noise, and apply environment-specific settings.
+
+## Setting the Environment
+
+The `environment` option identifies where your code is running:
+
+```javascript
+import * as Sentry from '@sentry/browser';
+
+Sentry.init({
+  dsn: '__DSN__',
+  environment: 'production',
+});
+```
+
+### Using Environment Variables
+
+```javascript
+Sentry.init({
+  dsn: '__DSN__',
+  environment: process.env.NODE_ENV || 'development',
+});
+```
+
+<Tip>
+Common environment names: `production`, `staging`, `development`, `qa`, `test`
+</Tip>
+
+## Environment-Specific Configuration
+
+### Conditional Initialization
+
+Only initialize Sentry in certain environments:
+
+```javascript
+if (process.env.NODE_ENV === 'production') {
+  Sentry.init({
+    dsn: '__DSN__',
+    environment: 'production',
+  });
+}
+```
+
+### Different Settings Per Environment
+
+```javascript
+const sentryConfig = {
+  dsn: '__DSN__',
+  environment: process.env.NODE_ENV,
+};
+
+if (process.env.NODE_ENV === 'production') {
+  sentryConfig.tracesSampleRate = 0.1; // 10% in production
+  sentryConfig.debug = false;
+} else if (process.env.NODE_ENV === 'staging') {
+  sentryConfig.tracesSampleRate = 0.5; // 50% in staging
+  sentryConfig.debug = false;
+} else {
+  sentryConfig.tracesSampleRate = 1.0; // 100% in development
+  sentryConfig.debug = true;
+}
+
+Sentry.init(sentryConfig);
+```
+
+## Environment Variables
+
+### Node.js
+
+```javascript
+import * as Sentry from '@sentry/node';
+
+Sentry.init({
+  dsn: process.env.SENTRY_DSN,
+  environment: process.env.SENTRY_ENVIRONMENT,
+  release: process.env.SENTRY_RELEASE,
+});
+```
+
+### Browser (with Build Tools)
+
+Using Webpack DefinePlugin or similar:
+
+```javascript
+// webpack.config.js
+const webpack = require('webpack');
+
+module.exports = {
+  plugins: [
+    new webpack.DefinePlugin({
+      'process.env.SENTRY_DSN': JSON.stringify(process.env.SENTRY_DSN),
+      'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV),
+    }),
+  ],
+};
+```
+
+Then in your code:
+
+```javascript
+import * as Sentry from '@sentry/browser';
+
+Sentry.init({
+  dsn: process.env.SENTRY_DSN,
+  environment: process.env.NODE_ENV,
+});
+```
+
+### Vite
+
+Vite automatically exposes environment variables prefixed with `VITE_`:
+
+```javascript
+// .env.production
+VITE_SENTRY_DSN=https://your-dsn@sentry.io/project-id
+VITE_SENTRY_ENVIRONMENT=production
+```
+
+```javascript
+import * as Sentry from '@sentry/browser';
+
+Sentry.init({
+  dsn: import.meta.env.VITE_SENTRY_DSN,
+  environment: import.meta.env.VITE_SENTRY_ENVIRONMENT,
+});
+```
+
+## Development vs Production
+
+### Disabling in Development
+
+```javascript
+Sentry.init({
+  dsn: '__DSN__',
+  environment: process.env.NODE_ENV,
+  enabled: process.env.NODE_ENV !== 'development',
+});
+```
+
+<Warning>
+Disabling Sentry in development means you won't catch development-only bugs. Consider using filtering instead.
+</Warning>
+
+### Development-Specific Settings
+
+```javascript
+Sentry.init({
+  dsn: '__DSN__',
+  environment: process.env.NODE_ENV,
+  debug: process.env.NODE_ENV === 'development',
+  tracesSampleRate: process.env.NODE_ENV === 'development' ? 1.0 : 0.1,
+});
+```
+
+## Browser Extension Detection
+
+The Browser SDK automatically detects browser extensions and disables itself by default:
+
+```javascript
+Sentry.init({
+  dsn: '__DSN__',
+  // Default: skipBrowserExtensionCheck: false
+  // Set to true to allow Sentry in browser extensions
+  skipBrowserExtensionCheck: true,
+});
+```
+
+## Multiple Environments in the Same Project
+
+Use environments to segment data in your Sentry project:
+
+```javascript
+// Production deployment
+Sentry.init({
+  dsn: '__DSN__',
+  environment: 'production',
+  release: 'my-app@1.0.0',
+});
+
+// Staging deployment
+Sentry.init({
+  dsn: '__DSN__',
+  environment: 'staging',
+  release: 'my-app@1.0.0-staging',
+});
+```
+
+Then in Sentry's UI, filter by environment to see only relevant issues.
+
+## Server-Side Environment Detection
+
+### Express.js
+
+```javascript
+import express from 'express';
+import * as Sentry from '@sentry/node';
+
+const app = express();
+
+Sentry.init({
+  dsn: '__DSN__',
+  environment: app.get('env'), // 'development' or 'production'
+});
+```
+
+### Cloud Platforms
+
+#### Vercel
+
+```javascript
+Sentry.init({
+  dsn: '__DSN__',
+  environment: process.env.VERCEL_ENV, // 'production', 'preview', or 'development'
+});
+```
+
+#### AWS Lambda
+
+```javascript
+Sentry.init({
+  dsn: '__DSN__',
+  environment: process.env.AWS_EXECUTION_ENV ? 'production' : 'development',
+});
+```
+
+#### Netlify
+
+```javascript
+Sentry.init({
+  dsn: '__DSN__',
+  environment: process.env.CONTEXT, // 'production', 'deploy-preview', or 'branch-deploy'
+});
+```
+
+## Framework-Specific Configuration
+
+### Next.js
+
+Next.js supports `.env.local`, `.env.production`, etc.:
+
+```bash
+# .env.production
+NEXT_PUBLIC_SENTRY_DSN=https://your-dsn@sentry.io/project-id
+SENTRY_ENVIRONMENT=production
+```
+
+```javascript
+// sentry.client.config.ts
+import * as Sentry from '@sentry/nextjs';
+
+Sentry.init({
+  dsn: process.env.NEXT_PUBLIC_SENTRY_DSN,
+  environment: process.env.SENTRY_ENVIRONMENT,
+});
+```
+
+### SvelteKit
+
+```javascript
+// hooks.server.ts
+import * as Sentry from '@sentry/sveltekit';
+import { dev } from '$app/environment';
+
+Sentry.init({
+  dsn: '__DSN__',
+  environment: dev ? 'development' : 'production',
+});
+```
+
+## Best Practices
+
+<Accordion title="Use consistent environment names">
+  Choose a standard set of environment names and use them consistently across all your projects. Common choices:
+  - `production`
+  - `staging`
+  - `development`
+  - `qa` / `test`
+</Accordion>
+
+<Accordion title="Don't hardcode sensitive values">
+  Never commit DSN or other sensitive configuration to source control. Use environment variables:
+  
+  ```javascript
+  // ❌ Bad
+  Sentry.init({ dsn: 'https://abc123@sentry.io/123' });
+  
+  // ✅ Good
+  Sentry.init({ dsn: process.env.SENTRY_DSN });
+  ```
+</Accordion>
+
+<Accordion title="Configure sampling per environment">
+  Production environments may need lower sampling rates to control volume:
+  
+  ```javascript
+  const isProduction = process.env.NODE_ENV === 'production';
+  
+  Sentry.init({
+    dsn: '__DSN__',
+    tracesSampleRate: isProduction ? 0.1 : 1.0,
+    replaysSessionSampleRate: isProduction ? 0.01 : 0.1,
+  });
+  ```
+</Accordion>
+
+<Accordion title="Enable debug mode in development">
+  Debug mode helps troubleshoot SDK issues during development:
+  
+  ```javascript
+  Sentry.init({
+    dsn: '__DSN__',
+    debug: process.env.NODE_ENV !== 'production',
+  });
+  ```
+</Accordion>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Sampling Configuration" href="/guides/configuration/sampling">
+    Control data volume with sampling rates
+  </Card>
+  <Card title="Filtering Events" href="/guides/configuration/filtering">
+    Filter events before sending to Sentry
+  </Card>
+</CardGroup>

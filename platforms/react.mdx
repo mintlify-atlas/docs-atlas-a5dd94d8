@@ -1,0 +1,467 @@
+---
+title: React SDK
+description: Error monitoring and performance tracking for React applications
+---
+
+The Sentry React SDK extends the Browser SDK with React-specific features including ErrorBoundary, Profiler components, and React Router integrations.
+
+## Installation
+
+<CodeGroup>
+```bash npm
+npm install @sentry/react
+```
+
+```bash yarn
+yarn add @sentry/react
+```
+
+```bash pnpm
+pnpm add @sentry/react
+```
+</CodeGroup>
+
+## Basic Setup
+
+Initialize Sentry before mounting your React application:
+
+```javascript
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import * as Sentry from '@sentry/react';
+import App from './App';
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  
+  integrations: [
+    Sentry.browserTracingIntegration(),
+    Sentry.replayIntegration(),
+  ],
+  
+  // Performance Monitoring
+  tracesSampleRate: 1.0,
+  
+  // Session Replay
+  replaysSessionSampleRate: 0.1,
+  replaysOnErrorSampleRate: 1.0,
+});
+
+const container = document.getElementById('root');
+const root = createRoot(container);
+root.render(<App />);
+```
+
+## React 19 Error Handling
+
+Starting with React 19, use the new error hooks for automatic error capture:
+
+```javascript
+import { createRoot } from 'react-dom/client';
+import * as Sentry from '@sentry/react';
+
+const container = document.getElementById('root');
+const root = createRoot(container, {
+  // Callback called when an error is thrown and not caught by an Error Boundary
+  onUncaughtError: Sentry.reactErrorHandler((error, errorInfo) => {
+    console.warn('Uncaught error', error, errorInfo.componentStack);
+  }),
+  
+  // Callback called when React catches an error in an Error Boundary
+  onCaughtError: Sentry.reactErrorHandler(),
+  
+  // Callback called when React automatically recovers from errors
+  onRecoverableError: Sentry.reactErrorHandler(),
+});
+
+root.render(<App />);
+```
+
+## ErrorBoundary Component
+
+Catch React component errors and display fallback UI:
+
+<Tabs>
+  <Tab title="Basic Usage">
+    ```javascript
+    import * as Sentry from '@sentry/react';
+
+    function FallbackComponent() {
+      return <div>An error has occurred</div>;
+    }
+
+    function App() {
+      return (
+        <Sentry.ErrorBoundary fallback={FallbackComponent} showDialog>
+          <YourComponents />
+        </Sentry.ErrorBoundary>
+      );
+    }
+    ```
+  </Tab>
+
+  <Tab title="Custom Fallback">
+    ```javascript
+    import * as Sentry from '@sentry/react';
+
+    function App() {
+      return (
+        <Sentry.ErrorBoundary
+          fallback={({ error, componentStack, resetError }) => (
+            <div>
+              <h1>Something went wrong</h1>
+              <p>{error.toString()}</p>
+              <button onClick={resetError}>Try again</button>
+            </div>
+          )}
+          onError={(error, componentStack, eventId) => {
+            console.log('Error captured:', eventId);
+          }}
+          beforeCapture={(scope, error, errorInfo) => {
+            scope.setTag('location', 'app-boundary');
+          }}
+        >
+          <YourComponents />
+        </Sentry.ErrorBoundary>
+      );
+    }
+    ```
+  </Tab>
+
+  <Tab title="HOC Pattern">
+    ```javascript
+    import * as Sentry from '@sentry/react';
+
+    const MyComponent = () => {
+      return <div>My Component</div>;
+    };
+
+    // Wrap component with error boundary
+    export default Sentry.withErrorBoundary(MyComponent, {
+      fallback: <div>An error occurred</div>,
+      showDialog: true,
+    });
+    ```
+  </Tab>
+</Tabs>
+
+## Profiler Component
+
+Track React component render performance:
+
+<Tabs>
+  <Tab title="withProfiler HOC">
+    ```javascript
+    import * as Sentry from '@sentry/react';
+
+    function MyComponent() {
+      return (
+        <div>
+          <ExpensiveComponent />
+          <AnotherComponent />
+        </div>
+      );
+    }
+
+    // Wrap component to track render performance
+    export default Sentry.withProfiler(MyComponent);
+    ```
+  </Tab>
+
+  <Tab title="Profiler Component">
+    ```javascript
+    import * as Sentry from '@sentry/react';
+
+    function Dashboard() {
+      return (
+        <div>
+          <Sentry.Profiler name="Dashboard">
+            <Header />
+            <Content />
+            <Footer />
+          </Sentry.Profiler>
+        </div>
+      );
+    }
+    ```
+  </Tab>
+
+  <Tab title="useProfiler Hook">
+    ```javascript
+    import * as Sentry from '@sentry/react';
+
+    function MyComponent() {
+      Sentry.useProfiler('MyComponent');
+      
+      return <div>Content</div>;
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## React Router Integration
+
+Sentry supports all major versions of React Router:
+
+<Tabs>
+  <Tab title="React Router v6">
+    ```javascript
+    import * as Sentry from '@sentry/react';
+    import { useEffect } from 'react';
+    import {
+      createBrowserRouter,
+      RouterProvider,
+    } from 'react-router-dom';
+
+    Sentry.init({
+      dsn: 'YOUR_DSN_HERE',
+      integrations: [
+        Sentry.reactRouterV6BrowserTracingIntegration({
+          useEffect,
+        }),
+      ],
+      tracesSampleRate: 1.0,
+    });
+
+    const sentryCreateBrowserRouter = Sentry.wrapCreateBrowserRouterV6(
+      createBrowserRouter
+    );
+
+    const router = sentryCreateBrowserRouter([
+      {
+        path: '/',
+        element: <Home />,
+      },
+      {
+        path: '/about',
+        element: <About />,
+      },
+    ]);
+
+    function App() {
+      return <RouterProvider router={router} />;
+    }
+    ```
+  </Tab>
+
+  <Tab title="React Router v5">
+    ```javascript
+    import * as Sentry from '@sentry/react';
+    import { Route, Router, Switch } from 'react-router-dom';
+    import { createBrowserHistory } from 'history';
+
+    const history = createBrowserHistory();
+
+    Sentry.init({
+      dsn: 'YOUR_DSN_HERE',
+      integrations: [
+        Sentry.reactRouterV5BrowserTracingIntegration({ history }),
+      ],
+      tracesSampleRate: 1.0,
+    });
+
+    const SentryRoute = Sentry.withSentryRouting(Route);
+
+    function App() {
+      return (
+        <Router history={history}>
+          <Switch>
+            <SentryRoute path="/" component={Home} exact />
+            <SentryRoute path="/about" component={About} />
+          </Switch>
+        </Router>
+      );
+    }
+    ```
+  </Tab>
+
+  <Tab title="React Router v4">
+    ```javascript
+    import * as Sentry from '@sentry/react';
+    import { Route, BrowserRouter } from 'react-router-dom';
+
+    Sentry.init({
+      dsn: 'YOUR_DSN_HERE',
+      integrations: [
+        Sentry.reactRouterV4BrowserTracingIntegration(),
+      ],
+      tracesSampleRate: 1.0,
+    });
+
+    const SentryRoute = Sentry.withSentryRouting(Route);
+
+    function App() {
+      return (
+        <BrowserRouter>
+          <SentryRoute path="/" component={Home} exact />
+          <SentryRoute path="/about" component={About} />
+        </BrowserRouter>
+      );
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## TanStack Router Integration
+
+For TanStack Router (formerly React Location):
+
+```javascript
+import * as Sentry from '@sentry/react';
+import { createRouter } from '@tanstack/react-router';
+
+const router = createRouter({
+  // your router config
+});
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  integrations: [
+    Sentry.tanstackRouterBrowserTracingIntegration(router),
+  ],
+  tracesSampleRate: 1.0,
+});
+```
+
+## Redux Integration
+
+Create a Sentry Redux enhancer:
+
+```javascript
+import * as Sentry from '@sentry/react';
+import { createStore, compose } from 'redux';
+import rootReducer from './reducers';
+
+const sentryReduxEnhancer = Sentry.createReduxEnhancer({
+  // Optionally configure
+  actionTransformer: (action) => {
+    // Transform or filter actions
+    return action;
+  },
+  stateTransformer: (state) => {
+    // Transform or filter state
+    return state;
+  },
+});
+
+const store = createStore(
+  rootReducer,
+  compose(sentryReduxEnhancer)
+);
+```
+
+## Performance Monitoring
+
+### Component Tracking
+
+```javascript
+import * as Sentry from '@sentry/react';
+
+function ExpensiveComponent() {
+  // Track this component's render performance
+  Sentry.useProfiler('ExpensiveComponent');
+  
+  // Component logic
+  return <div>Content</div>;
+}
+```
+
+### Custom Spans
+
+```javascript
+import * as Sentry from '@sentry/react';
+
+function DataFetchingComponent() {
+  const fetchData = async () => {
+    await Sentry.startSpan(
+      {
+        name: 'fetch-user-data',
+        op: 'http.client',
+      },
+      async () => {
+        const response = await fetch('/api/user');
+        return response.json();
+      },
+    );
+  };
+  
+  return <div>...</div>;
+}
+```
+
+## ErrorBoundary Configuration
+
+<Accordion title="ErrorBoundary Props">
+  The ErrorBoundary component accepts these props:
+
+  - **fallback**: React element or render function to display when error occurs
+  - **showDialog**: Show Sentry user feedback dialog
+  - **dialogOptions**: Options for the feedback dialog
+  - **onError**: Callback when error is caught
+  - **onReset**: Callback when error boundary is reset
+  - **onMount**: Callback on component mount
+  - **onUnmount**: Callback on component unmount
+  - **beforeCapture**: Modify scope before error is sent
+  - **handled**: Override whether error is marked as handled
+
+  ```javascript
+  <Sentry.ErrorBoundary
+    fallback={({ error, componentStack, resetError }) => (
+      <ErrorFallback error={error} reset={resetError} />
+    )}
+    showDialog
+    dialogOptions={{
+      title: 'Something went wrong',
+      subtitle: 'Our team has been notified',
+    }}
+    onError={(error, componentStack, eventId) => {
+      logErrorToService(error, eventId);
+    }}
+    beforeCapture={(scope) => {
+      scope.setLevel('fatal');
+    }}
+  >
+    <App />
+  </Sentry.ErrorBoundary>
+  ```
+</Accordion>
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Multiple Boundaries" icon="shield">
+    Use multiple ErrorBoundary components at different levels of your component tree.
+  </Card>
+  
+  <Card title="Profile Wisely" icon="gauge">
+    Only wrap components where you need render performance data.
+  </Card>
+  
+  <Card title="Router Integration" icon="route">
+    Always use router integrations for accurate transaction names.
+  </Card>
+  
+  <Card title="User Feedback" icon="comment">
+    Enable showDialog to collect user feedback on errors.
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="React Router" icon="route" href="/routing">
+    Set up router performance tracking
+  </Card>
+  
+  <Card title="Redux" icon="database" href="/state-management">
+    Integrate with state management
+  </Card>
+  
+  <Card title="Error Boundaries" icon="shield" href="/error-boundaries">
+    Advanced error boundary patterns
+  </Card>
+  
+  <Card title="Profiling" icon="chart-line" href="/profiling">
+    Component performance profiling
+  </Card>
+</CardGroup>

@@ -1,0 +1,434 @@
+---
+title: "Scope"
+description: "Holds additional event information and context data"
+---
+
+The `Scope` class holds additional event information such as breadcrumbs, user context, tags, and extra data. Scopes are used to attach metadata to events.
+
+## Overview
+
+Scopes contain:
+- User information
+- Breadcrumbs trail
+- Tags and extra data
+- Context data
+- Event processors
+- Propagation context for distributed tracing
+
+## Class Definition
+
+```typescript
+export class Scope {
+  protected _eventProcessors: EventProcessor[];
+  protected _breadcrumbs: Breadcrumb[];
+  protected _user: User;
+  protected _tags: { [key: string]: Primitive };
+  protected _attributes: RawAttributes<Record<string, unknown>>;
+  protected _extra: Extras;
+  protected _contexts: Contexts;
+  protected _attachments: Attachment[];
+  protected _propagationContext: PropagationContext;
+  protected _sdkProcessingMetadata: SdkProcessingMetadata;
+  protected _fingerprint?: string[];
+  protected _level?: SeverityLevel;
+  protected _transactionName?: string;
+  protected _session?: Session;
+  protected _client?: Client;
+  protected _lastEventId?: string;
+  protected _conversationId?: string;
+
+  public constructor();
+}
+```
+
+## Constructor
+
+Creates a new Scope instance with default values.
+
+```typescript
+const scope = new Scope();
+```
+
+## Methods
+
+### clone
+
+Clone all data from this scope into a new scope.
+
+```typescript
+public clone(): Scope
+```
+
+**Returns:** A new Scope instance with copied data.
+
+**Example:**
+
+```typescript
+const newScope = scope.clone();
+newScope.setTag('cloned', 'true');
+```
+
+### setUser
+
+Set the user for this scope.
+
+```typescript
+public setUser(user: User | null): this
+```
+
+<ParamField path="user" type="User | null" required>
+  User information. Set to `null` to unset the user.
+</ParamField>
+
+**Returns:** The Scope instance for chaining.
+
+**Example:**
+
+```typescript
+scope.setUser({
+  id: '123',
+  email: 'user@example.com',
+  username: 'johndoe',
+  ip_address: '{{auto}}'
+});
+```
+
+### getUser
+
+Get the user from this scope.
+
+```typescript
+public getUser(): User | undefined
+```
+
+**Returns:** The user object or `undefined`.
+
+### setTag
+
+Set a tag on the scope.
+
+```typescript
+public setTag(key: string, value: Primitive): this
+```
+
+<ParamField path="key" type="string" required>
+  The tag name.
+</ParamField>
+
+<ParamField path="value" type="Primitive" required>
+  The tag value (string, number, boolean, null, or undefined).
+</ParamField>
+
+**Example:**
+
+```typescript
+scope
+  .setTag('environment', 'production')
+  .setTag('version', '1.2.3')
+  .setTag('userId', 12345);
+```
+
+### setTags
+
+Set multiple tags at once.
+
+```typescript
+public setTags(tags: { [key: string]: Primitive }): this
+```
+
+<ParamField path="tags" type="Record<string, Primitive>" required>
+  Object containing tag key-value pairs.
+</ParamField>
+
+**Example:**
+
+```typescript
+scope.setTags({
+  environment: 'production',
+  version: '1.2.3',
+  server: 'web-01'
+});
+```
+
+### setExtra
+
+Set extra data on the scope.
+
+```typescript
+public setExtra(key: string, extra: Extra): this
+```
+
+<ParamField path="key" type="string" required>
+  The extra data key.
+</ParamField>
+
+<ParamField path="extra" type="Extra" required>
+  Any value to attach as extra data.
+</ParamField>
+
+**Example:**
+
+```typescript
+scope.setExtra('requestData', {
+  body: req.body,
+  query: req.query,
+  params: req.params
+});
+```
+
+### setExtras
+
+Set multiple extra data fields at once.
+
+```typescript
+public setExtras(extras: Extras): this
+```
+
+<ParamField path="extras" type="Extras" required>
+  Object containing extra data key-value pairs.
+</ParamField>
+
+### setContext
+
+Set context data.
+
+```typescript
+public setContext(key: string, context: Context | null): this
+```
+
+<ParamField path="key" type="string" required>
+  The context key (e.g., 'os', 'device', 'app').
+</ParamField>
+
+<ParamField path="context" type="Context | null" required>
+  Context data object. Set to `null` to remove the context.
+</ParamField>
+
+**Example:**
+
+```typescript
+scope.setContext('app', {
+  app_name: 'my-app',
+  app_version: '1.0.0',
+  app_build: '123'
+});
+
+scope.setContext('device', {
+  name: 'iPhone 14',
+  family: 'iOS',
+  model: 'iPhone14,3'
+});
+```
+
+### setContexts
+
+Set multiple contexts at once.
+
+```typescript
+public setContexts(contexts: Contexts): this
+```
+
+<ParamField path="contexts" type="Contexts" required>
+  Object containing context data.
+</ParamField>
+
+### setLevel
+
+Set the severity level.
+
+```typescript
+public setLevel(level: SeverityLevel): this
+```
+
+<ParamField path="level" type="SeverityLevel" required>
+  One of: `'fatal'`, `'error'`, `'warning'`, `'info'`, `'debug'`, or `'log'`.
+</ParamField>
+
+**Example:**
+
+```typescript
+scope.setLevel('warning');
+```
+
+### setFingerprint
+
+Set the fingerprint for grouping events.
+
+```typescript
+public setFingerprint(fingerprint: string[]): this
+```
+
+<ParamField path="fingerprint" type="string[]" required>
+  Array of strings to group events by.
+</ParamField>
+
+**Example:**
+
+```typescript
+// Group by custom logic
+scope.setFingerprint(['{{ default }}', 'custom-group']);
+
+// Force separate issue
+scope.setFingerprint(['database-connection-error', dbHost]);
+```
+
+### addBreadcrumb
+
+Add a breadcrumb to the scope.
+
+```typescript
+public addBreadcrumb(
+  breadcrumb: Breadcrumb,
+  maxBreadcrumbs?: number
+): this
+```
+
+<ParamField path="breadcrumb" type="Breadcrumb" required>
+  The breadcrumb to add. See [Breadcrumb Types](/api/types/breadcrumb) for details.
+</ParamField>
+
+<ParamField path="maxBreadcrumbs" type="number">
+  Maximum number of breadcrumbs to store. Defaults to 100.
+</ParamField>
+
+**Example:**
+
+```typescript
+scope.addBreadcrumb({
+  type: 'http',
+  category: 'fetch',
+  message: 'GET /api/users',
+  level: 'info',
+  data: {
+    url: '/api/users',
+    method: 'GET',
+    status_code: 200
+  },
+  timestamp: Date.now() / 1000
+});
+```
+
+### getLastBreadcrumb
+
+Get the most recent breadcrumb.
+
+```typescript
+public getLastBreadcrumb(): Breadcrumb | undefined
+```
+
+**Returns:** The last breadcrumb or `undefined`.
+
+### clearBreadcrumbs
+
+Clear all breadcrumbs from the scope.
+
+```typescript
+public clearBreadcrumbs(): this
+```
+
+### addEventProcessor
+
+Add an event processor to the scope.
+
+```typescript
+public addEventProcessor(callback: EventProcessor): this
+```
+
+<ParamField path="callback" type="EventProcessor" required>
+  Function that processes events before they are sent.
+</ParamField>
+
+**Example:**
+
+```typescript
+scope.addEventProcessor((event) => {
+  // Filter out sensitive data
+  if (event.request?.data) {
+    delete event.request.data.password;
+  }
+  return event;
+});
+```
+
+### addAttachment
+
+Add an attachment to the scope.
+
+```typescript
+public addAttachment(attachment: Attachment): this
+```
+
+<ParamField path="attachment" type="Attachment" required>
+  File attachment to include with events.
+</ParamField>
+
+**Example:**
+
+```typescript
+scope.addAttachment({
+  filename: 'log.txt',
+  data: logBuffer,
+  contentType: 'text/plain'
+});
+```
+
+### clear
+
+Clear all data from the scope.
+
+```typescript
+public clear(): this
+```
+
+### getPropagationContext
+
+Get the propagation context for distributed tracing.
+
+```typescript
+public getPropagationContext(): PropagationContext
+```
+
+**Returns:** The propagation context containing trace and span IDs.
+
+### setPropagationContext
+
+Set the propagation context.
+
+```typescript
+public setPropagationContext(context: PropagationContext): this
+```
+
+<ParamField path="context" type="PropagationContext" required>
+  Propagation context with traceId, spanId, and other tracing data.
+</ParamField>
+
+## Scope Data
+
+The scope data interface represents the normalized data:
+
+```typescript
+export interface ScopeData {
+  eventProcessors: EventProcessor[];
+  breadcrumbs: Breadcrumb[];
+  user: User;
+  tags: { [key: string]: Primitive };
+  attributes?: RawAttributes<Record<string, unknown>>;
+  extra: Extras;
+  contexts: Contexts;
+  attachments: Attachment[];
+  propagationContext: PropagationContext;
+  sdkProcessingMetadata: SdkProcessingMetadata;
+  fingerprint: string[];
+  level?: SeverityLevel;
+  transactionName?: string;
+  span?: Span;
+  conversationId?: string;
+}
+```
+
+## Related
+
+- [User Types](/api/types/user)
+- [Breadcrumb Types](/api/types/breadcrumb)
+- [Event Types](/api/types/event)
+- [Client](/api/core/client)

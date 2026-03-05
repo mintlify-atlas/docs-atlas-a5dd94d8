@@ -1,0 +1,444 @@
+---
+title: "Sampling"
+description: "Control which events and traces are sent to Sentry"
+---
+
+Sampling allows you to control the volume of data sent to Sentry by only capturing a percentage of events.
+
+## Overview
+
+Sentry supports two types of sampling:
+
+1. **Error Sampling** - Controls error events
+2. **Trace Sampling** - Controls transaction/span events
+
+## Error Sampling
+
+### sampleRate
+
+Simple percentage-based sampling for error events:
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+Sentry.init({
+  dsn: 'your-dsn',
+  sampleRate: 0.25 // Sample 25% of error events
+});
+```
+
+<ParamField path="sampleRate" type="number" default="1.0">
+  Float between 0.0 (0%) and 1.0 (100%) of error events to send.
+</ParamField>
+
+**Implementation:**
+
+From `packages/core/src/client.ts`:
+
+```typescript
+const parsedSampleRate = parseSampleRate(sampleRate);
+if (isError && typeof parsedSampleRate === 'number' && 
+    safeMathRandom() > parsedSampleRate) {
+  this.recordDroppedEvent('sample_rate', 'error');
+  return rejectedSyncPromise(
+    `Discarding event (sampling rate = ${sampleRate})`
+  );
+}
+```
+
+## Trace Sampling
+
+### tracesSampleRate
+
+Simple percentage-based sampling for traces:
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+Sentry.init({
+  dsn: 'your-dsn',
+  tracesSampleRate: 0.1 // Sample 10% of traces
+});
+```
+
+<ParamField path="tracesSampleRate" type="number">
+  Float between 0.0 (0%) and 1.0 (100%) of traces to send.
+</ParamField>
+
+### tracesSampler
+
+Dynamic sampling function for fine-grained control:
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+Sentry.init({
+  dsn: 'your-dsn',
+  tracesSampler: (samplingContext) => {
+    // Examine provided context data to make sampling decision
+    // Returns a sample rate between 0.0 and 1.0, or boolean
+    
+    return 0.1;
+  }
+});
+```
+
+<ParamField path="samplingContext" type="SamplingContext">
+  Context data for making sampling decisions.
+  
+  <ParamField path="name" type="string">
+    Transaction/span name.
+  </ParamField>
+  
+  <ParamField path="attributes" type="SpanAttributes">
+    Span attributes including operation, HTTP method, etc.
+  </ParamField>
+  
+  <ParamField path="parentSampled" type="boolean">
+    Whether the parent span was sampled.
+  </ParamField>
+  
+  <ParamField path="transactionContext" type="object">
+    Additional transaction context.
+  </ParamField>
+  
+  <ParamField path="request" type="object">
+    Request data (Node.js/server-side).
+  </ParamField>
+  
+  <ParamField path="location" type="object">
+    Browser location (browser-side).
+  </ParamField>
+</ParamField>
+
+## Sampling Strategies
+
+### Sample by Transaction Name
+
+```typescript
+Sentry.init({
+  dsn: 'your-dsn',
+  tracesSampler: ({ name }) => {
+    // Sample 100% of checkout transactions
+    if (name?.includes('checkout')) {
+      return 1.0;
+    }
+    
+    // Don't sample health checks
+    if (name === 'GET /health') {
+      return 0.0;
+    }
+    
+    // Sample 10% of everything else
+    return 0.1;
+  }
+});
+```
+
+### Sample by HTTP Method
+
+```typescript
+Sentry.init({
+  dsn: 'your-dsn',
+  tracesSampler: ({ attributes }) => {
+    const method = attributes?.['http.method'];
+    
+    // Sample 100% of POST/PUT/DELETE
+    if (method === 'POST' || method === 'PUT' || method === 'DELETE') {
+      return 1.0;
+    }
+    
+    // Sample 5% of GET requests
+    return 0.05;
+  }
+});
+```
+
+### Sample by URL Pattern
+
+```typescript
+Sentry.init({
+  dsn: 'your-dsn',
+  tracesSampler: ({ attributes }) => {
+    const url = attributes?.['http.url'] as string;
+    
+    if (!url) return 0.1;
+    
+    // Sample 100% of API endpoints
+    if (url.includes('/api/')) {
+      return 1.0;
+    }
+    
+    // Don't sample assets
+    if (url.match(/\.(js|css|png|jpg)$/)) {
+      return 0.0;
+    }
+    
+    return 0.1;
+  }
+});
+```
+
+### Sample by User
+
+```typescript
+Sentry.init({
+  dsn: 'your-dsn',
+  tracesSampler: (samplingContext) => {
+    const user = Sentry.getCurrentScope().getUser();
+    
+    // Sample 100% for admin users
+    if (user?.role === 'admin') {
+      return 1.0;
+    }
+    
+    // Sample 100% for beta testers
+    if (user?.beta_tester) {
+      return 1.0;
+    }
+    
+    // Sample 10% for regular users
+    return 0.1;
+  }
+});
+```
+
+### Sample by Environment
+
+```typescript
+Sentry.init({
+  dsn: 'your-dsn',
+  tracesSampler: () => {
+    // Sample 100% in development
+    if (process.env.NODE_ENV === 'development') {
+      return 1.0;
+    }
+    
+    // Sample 50% in staging
+    if (process.env.NODE_ENV === 'staging') {
+      return 0.5;
+    }
+    
+    // Sample 10% in production
+    return 0.1;
+  }
+});
+```
+
+### Sample by Response Status
+
+```typescript
+Sentry.init({
+  dsn: 'your-dsn',
+  tracesSampler: ({ attributes }) => {
+    const status = attributes?.['http.status_code'] as number;
+    
+    // Sample 100% of errors
+    if (status >= 500) {
+      return 1.0;
+    }
+    
+    // Sample 50% of client errors
+    if (status >= 400) {
+      return 0.5;
+    }
+    
+    // Sample 5% of successful requests
+    return 0.05;
+  }
+});
+```
+
+## Parent Sampling
+
+Child spans inherit sampling decisions from their parent:
+
+```typescript
+Sentry.init({
+  dsn: 'your-dsn',
+  tracesSampler: ({ parentSampled, name }) => {
+    // If parent is sampled, sample child
+    if (parentSampled !== undefined) {
+      return parentSampled ? 1.0 : 0.0;
+    }
+    
+    // Root span sampling logic
+    return name?.includes('important') ? 1.0 : 0.1;
+  }
+});
+```
+
+## beforeSampling Hook
+
+Force sampling decisions before sampling runs:
+
+```typescript
+import { getClient } from '@sentry/node';
+
+const client = getClient();
+
+if (client) {
+  client.on('beforeSampling', (samplingData, samplingDecision) => {
+    // Force sampling for specific operations
+    if (samplingData.spanName.includes('critical')) {
+      samplingDecision.decision = true;
+    }
+  });
+}
+```
+
+## Head-Based Sampling
+
+Sampling decisions are made at the root span and inherited by all children:
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+Sentry.startSpan(
+  { name: 'Parent Operation' },
+  (parentSpan) => {
+    const isSampled = parentSpan.isRecording();
+    
+    // All child spans inherit this decision
+    Sentry.startSpan(
+      { name: 'Child Operation 1' },
+      (child1) => {
+        console.log('Child 1 sampled:', child1.isRecording() === isSampled);
+      }
+    );
+    
+    Sentry.startSpan(
+      { name: 'Child Operation 2' },
+      (child2) => {
+        console.log('Child 2 sampled:', child2.isRecording() === isSampled);
+      }
+    );
+  }
+);
+```
+
+## Dynamic Sampling Context
+
+Sampling context is propagated across services:
+
+```typescript
+import { getDynamicSamplingContextFromSpan } from '@sentry/core';
+
+const span = Sentry.getActiveSpan();
+if (span) {
+  const dsc = getDynamicSamplingContextFromSpan(span);
+  
+  console.log('Trace ID:', dsc.trace_id);
+  console.log('Sample Rate:', dsc.sample_rate);
+  console.log('Sampled:', dsc.sampled);
+  console.log('Release:', dsc.release);
+  console.log('Environment:', dsc.environment);
+}
+```
+
+## Sampling Best Practices
+
+### 1. Start with Low Rates
+
+```typescript
+// Start conservative
+Sentry.init({
+  tracesSampleRate: 0.01 // 1%
+});
+
+// Increase gradually based on volume
+```
+
+### 2. Sample Critical Paths Higher
+
+```typescript
+Sentry.init({
+  tracesSampler: ({ name }) => {
+    // Critical business flows: 100%
+    if (name?.match(/checkout|payment|signup/)) {
+      return 1.0;
+    }
+    
+    // Everything else: 5%
+    return 0.05;
+  }
+});
+```
+
+### 3. Don't Sample Health Checks
+
+```typescript
+Sentry.init({
+  tracesSampler: ({ name }) => {
+    if (name === 'GET /health' || name === 'GET /readiness') {
+      return 0.0;
+    }
+    return 0.1;
+  }
+});
+```
+
+### 4. Use Consistent Sampling
+
+```typescript
+// Bad: Random sampling per request
+tracesSampler: () => Math.random() > 0.5 ? 1.0 : 0.0
+
+// Good: Consistent percentage
+tracesSampler: () => 0.1
+```
+
+### 5. Consider Cost vs Value
+
+```typescript
+Sentry.init({
+  tracesSampler: ({ name, attributes }) => {
+    const isHighValue = 
+      name?.includes('checkout') ||
+      attributes?.['http.status_code'] >= 500;
+    
+    return isHighValue ? 1.0 : 0.01;
+  }
+});
+```
+
+## Monitoring Sampling
+
+Track sampling rates in your application:
+
+```typescript
+const samplingStats = {
+  total: 0,
+  sampled: 0
+};
+
+Sentry.init({
+  dsn: 'your-dsn',
+  tracesSampler: (context) => {
+    samplingStats.total++;
+    
+    const rate = 0.1;
+    const shouldSample = Math.random() < rate;
+    
+    if (shouldSample) {
+      samplingStats.sampled++;
+    }
+    
+    // Log every 100 traces
+    if (samplingStats.total % 100 === 0) {
+      console.log(
+        `Sampling rate: ${(samplingStats.sampled / samplingStats.total * 100).toFixed(2)}%`
+      );
+    }
+    
+    return shouldSample ? 1.0 : 0.0;
+  }
+});
+```
+
+## Related
+
+- [Configuration Options](/api/configuration/options)
+- [Spans](/api/tracing/spans)
+- [Trace Context](/api/tracing/trace-context)
+- [Client](/api/core/client)

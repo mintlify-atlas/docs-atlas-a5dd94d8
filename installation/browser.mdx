@@ -1,0 +1,280 @@
+---
+title: 'Browser Installation'
+description: 'Install and configure the Sentry SDK for browser JavaScript applications'
+---
+
+The `@sentry/browser` package provides error tracking and performance monitoring for browser JavaScript applications.
+
+## Prerequisites
+
+- Node.js 18 or newer
+- A Sentry account and project DSN
+
+## Installation
+
+<Steps>
+  <Step title="Install the Package">
+    Install `@sentry/browser` using your preferred package manager:
+
+    <CodeGroup>
+    ```bash npm
+    npm install @sentry/browser
+    ```
+
+    ```bash yarn
+    yarn add @sentry/browser
+    ```
+
+    ```bash pnpm
+    pnpm add @sentry/browser
+    ```
+    </CodeGroup>
+
+    **Current Version:** 10.42.0
+  </Step>
+
+  <Step title="Initialize Sentry">
+    Initialize Sentry as early as possible in your application. Call `Sentry.init()` before any other code runs:
+
+    ```javascript
+    import * as Sentry from '@sentry/browser';
+
+    Sentry.init({
+      dsn: 'YOUR_DSN_HERE',
+      
+      // Set tracesSampleRate to 1.0 to capture 100%
+      // of transactions for tracing.
+      tracesSampleRate: 1.0,
+      
+      // Set `tracePropagationTargets` to control what URLs
+      // distributed tracing should be enabled for
+      tracePropagationTargets: ['localhost', /^https:\/\/yourserver\.io\/api/],
+    });
+    ```
+
+    <Note>
+      The `dsn` (Data Source Name) tells the SDK where to send events. You can find your DSN in your Sentry project settings.
+    </Note>
+  </Step>
+
+  <Step title="Verify Installation">
+    Test that Sentry is working by triggering a test error:
+
+    ```javascript
+    // This will create an error and send it to Sentry
+    Sentry.captureException(new Error('Test error'));
+    ```
+
+    You should see the error appear in your Sentry dashboard within a few seconds.
+  </Step>
+</Steps>
+
+## Usage
+
+### Capturing Errors
+
+Capture exceptions manually:
+
+```javascript
+import * as Sentry from '@sentry/browser';
+
+try {
+  // Your code that might throw
+  someFunctionThatMightFail();
+} catch (error) {
+  Sentry.captureException(error);
+}
+```
+
+### Setting Context
+
+Add context information to events:
+
+```javascript
+import * as Sentry from '@sentry/browser';
+
+// Set user information
+Sentry.setUser({ 
+  id: '4711',
+  email: 'user@example.com',
+  username: 'john_doe'
+});
+
+// Set custom tags
+Sentry.setTag('user_mode', 'admin');
+Sentry.setTag('page_locale', 'en-us');
+
+// Set extra context data
+Sentry.setExtra('battery', 0.7);
+Sentry.setContext('application_area', { 
+  location: 'checkout' 
+});
+```
+
+### Adding Breadcrumbs
+
+Breadcrumbs help trace user actions leading to an error:
+
+```javascript
+import * as Sentry from '@sentry/browser';
+
+Sentry.addBreadcrumb({
+  message: 'User clicked checkout button',
+  category: 'action',
+  level: 'info',
+});
+```
+
+### Performance Monitoring
+
+Enable browser tracing for performance monitoring:
+
+```javascript
+import * as Sentry from '@sentry/browser';
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  
+  integrations: [
+    Sentry.browserTracingIntegration(),
+  ],
+  
+  tracesSampleRate: 1.0,
+});
+```
+
+### Session Replay
+
+Capture session replays to see what users experienced:
+
+```javascript
+import * as Sentry from '@sentry/browser';
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  
+  integrations: [
+    Sentry.replayIntegration({
+      maskAllText: true,
+      blockAllMedia: true,
+    }),
+  ],
+  
+  // Session Replay sample rate
+  replaysSessionSampleRate: 0.1,
+  // Session Replay sample rate when an error occurs
+  replaysOnErrorSampleRate: 1.0,
+});
+```
+
+## Advanced Configuration
+
+### Environment Configuration
+
+```javascript
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  environment: process.env.NODE_ENV || 'development',
+  release: 'my-app@1.0.0',
+});
+```
+
+### Filtering Events
+
+Control which errors are sent to Sentry:
+
+```javascript
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  
+  beforeSend(event, hint) {
+    // Don't send errors that contain specific text
+    if (event.exception?.values?.[0]?.value?.includes('Non-Error')) {
+      return null;
+    }
+    return event;
+  },
+});
+```
+
+### Custom Integrations
+
+```javascript
+import * as Sentry from '@sentry/browser';
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  
+  integrations: [
+    Sentry.browserTracingIntegration(),
+    Sentry.replayIntegration(),
+    Sentry.captureConsoleIntegration({
+      levels: ['error'],
+    }),
+    Sentry.httpClientIntegration(),
+  ],
+});
+```
+
+## CDN Installation
+
+<Note>
+  You can also load Sentry directly from a CDN without npm/yarn:
+</Note>
+
+```html
+<script
+  src="https://browser.sentry-cdn.com/10.42.0/bundle.min.js"
+  integrity="sha384-..."
+  crossorigin="anonymous"
+></script>
+
+<script>
+  Sentry.init({
+    dsn: 'YOUR_DSN_HERE',
+  });
+</script>
+```
+
+## Troubleshooting
+
+### Source Maps
+
+For production builds, upload source maps to get readable stack traces:
+
+1. Install the Sentry Webpack plugin or Vite plugin
+2. Configure your build tool to generate source maps
+3. Upload source maps during your build process
+
+<Tip>
+  Check out the [Sentry Webpack Plugin](https://www.npmjs.com/package/@sentry/webpack-plugin) or [Sentry Vite Plugin](https://www.npmjs.com/package/@sentry/vite-plugin) for automated source map uploads.
+</Tip>
+
+### Bundle Size
+
+The browser SDK is optimized for tree-shaking. Only import what you need:
+
+```javascript
+// Instead of importing everything
+import * as Sentry from '@sentry/browser';
+
+// Import only what you need
+import { init, captureException } from '@sentry/browser';
+```
+
+<Warning>
+  Be mindful of bundle size when adding integrations. Each integration adds to your bundle. Only enable integrations you actually use.
+</Warning>
+
+## Next Steps
+
+- Configure [Performance Monitoring](/essentials/performance-monitoring)
+- Set up [Session Replay](/essentials/session-replay)
+- Learn about [Error Filtering](/essentials/error-filtering)
+- Explore [Custom Instrumentation](/essentials/custom-instrumentation)
+
+## Related Documentation
+
+- [Official Browser SDK Docs](https://docs.sentry.io/platforms/javascript/guides/browser/)
+- [Sentry Browser Package on npm](https://www.npmjs.com/package/@sentry/browser)
+- [Source Code on GitHub](https://github.com/getsentry/sentry-javascript/tree/master/packages/browser)

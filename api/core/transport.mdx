@@ -1,0 +1,269 @@
+---
+title: "Transport"
+description: "Sends events and envelopes to Sentry"
+---
+
+The Transport is responsible for sending events to Sentry. It handles buffering, rate limiting, and error handling.
+
+## Overview
+
+Transports:
+- Send envelopes containing events to Sentry
+- Buffer requests to prevent overwhelming the system
+- Handle rate limiting from the Sentry backend
+- Support graceful shutdown with flushing
+
+## Interface Definition
+
+```typescript
+export interface Transport {
+  send(request: Envelope): PromiseLike<TransportMakeRequestResponse>;
+  flush(timeout?: number): PromiseLike<boolean>;
+}
+```
+
+## Methods
+
+### send
+
+Send an envelope to Sentry.
+
+```typescript
+send(request: Envelope): PromiseLike<TransportMakeRequestResponse>
+```
+
+<ParamField path="request" type="Envelope" required>
+  The envelope containing events to send.
+</ParamField>
+
+**Returns:** Promise resolving to a response object.
+
+<ResponseField name="statusCode" type="number">
+  HTTP status code of the response.
+</ResponseField>
+
+<ResponseField name="headers" type="object">
+  Response headers including rate limit information.
+  
+  <ResponseField name="x-sentry-rate-limits" type="string | null">
+    Rate limit information from Sentry.
+  </ResponseField>
+  
+  <ResponseField name="retry-after" type="string | null">
+    Time to wait before retrying.
+  </ResponseField>
+</ResponseField>
+
+### flush
+
+Wait for all pending requests to complete.
+
+```typescript
+flush(timeout?: number): PromiseLike<boolean>
+```
+
+<ParamField path="timeout" type="number">
+  Maximum time in milliseconds to wait. If not provided, waits indefinitely.
+</ParamField>
+
+**Returns:** Promise resolving to `true` if all requests completed, `false` if timeout was reached.
+
+## Creating a Transport
+
+Use the `createTransport` helper to create a transport:
+
+```typescript
+import { createTransport } from '@sentry/core';
+
+const transport = createTransport(
+  options: InternalBaseTransportOptions,
+  makeRequest: TransportRequestExecutor,
+  buffer?: PromiseBuffer<TransportMakeRequestResponse>
+): Transport
+```
+
+<ParamField path="options" type="InternalBaseTransportOptions" required>
+  Transport configuration options.
+  
+  <ParamField path="url" type="string" required>
+    The Sentry ingestion endpoint URL.
+  </ParamField>
+  
+  <ParamField path="headers" type="Record<string, string>">
+    Custom HTTP headers to include in requests.
+  </ParamField>
+  
+  <ParamField path="bufferSize" type="number">
+    Maximum number of requests to buffer. Defaults to 64.
+  </ParamField>
+  
+  <ParamField path="tunnel" type="string">
+    Tunnel URL for proxying requests.
+  </ParamField>
+  
+  <ParamField path="recordDroppedEvent" type="function" required>
+    Callback to record dropped events for client reports.
+  </ParamField>
+</ParamField>
+
+<ParamField path="makeRequest" type="TransportRequestExecutor" required>
+  Function that executes the actual HTTP request.
+  
+  ```typescript
+  type TransportRequestExecutor = (
+    request: TransportRequest
+  ) => PromiseLike<TransportMakeRequestResponse>
+  ```
+</ParamField>
+
+<ParamField path="buffer" type="PromiseBuffer">
+  Optional custom promise buffer for request queuing.
+</ParamField>
+
+## Transport Request
+
+```typescript
+export type TransportRequest = {
+  body: string | Uint8Array;
+};
+```
+
+<ResponseField name="body" type="string | Uint8Array" required>
+  The serialized envelope to send.
+</ResponseField>
+
+## Example: HTTP Transport
+
+```typescript
+import { createTransport, BaseTransportOptions } from '@sentry/core';
+
+function makeHttpRequest(
+  request: TransportRequest
+): Promise<TransportMakeRequestResponse> {
+  return fetch(options.url, {
+    method: 'POST',
+    body: request.body,
+    headers: {
+      'Content-Type': 'application/x-sentry-envelope',
+      ...options.headers
+    }
+  }).then(response => ({
+    statusCode: response.status,
+    headers: {
+      'x-sentry-rate-limits': response.headers.get('x-sentry-rate-limits'),
+      'retry-after': response.headers.get('retry-after')
+    }
+  }));
+}
+
+export function makeHttpTransport(
+  options: BaseTransportOptions
+): Transport {
+  return createTransport(options, makeHttpRequest);
+}
+```
+
+## Example: Custom Transport
+
+```typescript
+import { Transport, Envelope } from '@sentry/core';
+
+class CustomTransport implements Transport {
+  constructor(private options: CustomTransportOptions) {}
+
+  send(envelope: Envelope): Promise<TransportMakeRequestResponse> {
+    // Custom implementation
+    return this.customSendLogic(envelope);
+  }
+
+  flush(timeout?: number): Promise<boolean> {
+    // Wait for pending requests
+    return this.waitForPendingRequests(timeout);
+  }
+
+  private customSendLogic(envelope: Envelope): Promise<TransportMakeRequestResponse> {
+    // Implement your custom send logic
+    return Promise.resolve({ statusCode: 200 });
+  }
+
+  private waitForPendingRequests(timeout?: number): Promise<boolean> {
+    // Implement flush logic
+    return Promise.resolve(true);
+  }
+}
+```
+
+## Rate Limiting
+
+The transport automatically handles rate limiting:
+
+```typescript
+// From packages/core/src/transports/base.ts
+
+// Rate limited items are dropped before sending
+forEachEnvelopeItem(envelope, (item, type) => {
+  const dataCategory = envelopeItemTypeToDataCategory(type);
+  if (isRateLimited(rateLimits, dataCategory)) {
+    options.recordDroppedEvent('ratelimit_backoff', dataCategory);
+  } else {
+    filteredEnvelopeItems.push(item);
+  }
+});
+```
+
+## Buffer Management
+
+Transports use a promise buffer to limit concurrent requests:
+
+```typescript
+import { makePromiseBuffer } from '@sentry/core';
+
+const DEFAULT_TRANSPORT_BUFFER_SIZE = 64;
+
+const buffer = makePromiseBuffer(
+  options.bufferSize || DEFAULT_TRANSPORT_BUFFER_SIZE
+);
+
+// Add request to buffer
+buffer.add(requestTask).then(
+  result => result,
+  error => {
+    if (error === SENTRY_BUFFER_FULL_ERROR) {
+      recordEnvelopeLoss('queue_overflow');
+      return Promise.resolve({});
+    }
+    throw error;
+  }
+);
+```
+
+## Error Handling
+
+Transports handle various error scenarios:
+
+**413 Content Too Large:**
+```typescript
+if (response.statusCode === 413) {
+  DEBUG_BUILD && debug.error(
+    'Envelope was discarded due to exceeding size limits.'
+  );
+  recordEnvelopeLoss('send_error');
+  return response;
+}
+```
+
+**Network Errors:**
+```typescript
+try {
+  return await makeRequest({ body: serializedEnvelope });
+} catch (error) {
+  recordEnvelopeLoss('network_error');
+  throw error;
+}
+```
+
+## Related
+
+- [Transport Options](/api/configuration/transport-options)
+- [Client](/api/core/client)
+- [Configuration](/api/configuration/options)

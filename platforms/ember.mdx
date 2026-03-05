@@ -1,0 +1,501 @@
+---
+title: Ember SDK
+description: Error monitoring and performance tracking for Ember.js applications
+---
+
+The Sentry Ember SDK is an Ember addon that wraps `@sentry/browser` with Ember-specific functionality including automatic error capture and performance instrumentation.
+
+## Installation
+
+Install as an Ember addon:
+
+```bash
+ember install @sentry/ember
+```
+
+## Basic Setup
+
+Initialize Sentry in your `app.js` before the application initializes:
+
+```javascript
+// app/app.js
+import Application from '@ember/application';
+import Resolver from 'ember-resolver';
+import loadInitializers from 'ember-load-initializers';
+import config from './config/environment';
+import * as Sentry from '@sentry/ember';
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  
+  // Performance Monitoring
+  tracesSampleRate: 1.0,
+  
+  // Set tracesSampleRate to 1.0 to capture 100%
+  // of transactions for performance monitoring.
+  // We recommend adjusting this value in production
+});
+
+export default class App extends Application {
+  modulePrefix = config.modulePrefix;
+  podModulePrefix = config.podModulePrefix;
+  Resolver = Resolver;
+}
+
+loadInitializers(App, config.modulePrefix);
+```
+
+## Configuration
+
+### Environment Configuration
+
+Configure Ember-specific options in `config/environment.js`:
+
+```javascript
+// config/environment.js
+module.exports = function (environment) {
+  let ENV = {
+    // ... other config
+    
+    '@sentry/ember': {
+      // Disable automatic performance instrumentation
+      disablePerformance: false,
+      
+      // All runloop queue durations will be added as spans
+      minimumRunloopQueueDuration: 5, // ms, default: 5
+      
+      // Disable automatic component instrumentation
+      disableInstrumentComponents: false,
+      
+      // All component render durations will be added as spans
+      minimumComponentRenderDuration: 2, // ms, default: 2
+      
+      // Enable component definition tracking
+      enableComponentDefinition: false,
+    },
+  };
+  
+  return ENV;
+};
+```
+
+## Performance Monitoring
+
+### Route Instrumentation
+
+Instrument routes to track lifecycle hooks:
+
+```javascript
+// app/routes/dashboard.js
+import Route from '@ember/routing/route';
+import { instrumentRoutePerformance } from '@sentry/ember';
+
+class DashboardRoute extends Route {
+  async beforeModel(transition) {
+    // This will be tracked
+    await this.checkPermissions();
+  }
+  
+  async model(params) {
+    // This will be tracked
+    return await this.store.query('dashboard', params);
+  }
+  
+  async afterModel(model, transition) {
+    // This will be tracked
+    await this.loadRelatedData(model);
+  }
+  
+  setupController(controller, model) {
+    // This will be tracked
+    super.setupController(controller, model);
+    controller.set('extraData', this.computeExtraData(model));
+  }
+}
+
+// Wrap the route to enable instrumentation
+export default instrumentRoutePerformance(DashboardRoute);
+```
+
+This tracks:
+- `beforeModel` hook duration
+- `model` hook duration
+- `afterModel` hook duration
+- `setupController` hook duration
+
+### Runloop Queue Instrumentation
+
+The SDK automatically instruments Ember's runloop queues:
+
+```javascript
+// config/environment.js
+ENV['@sentry/ember'] = {
+  // Set minimum duration threshold (ms)
+  minimumRunloopQueueDuration: 0, // Track all queue durations
+};
+```
+
+Tracked queues:
+- `sync` - Synchronization queue
+- `actions` - Action queue
+- `routerTransitions` - Router transition queue
+- `render` - Render queue
+- `afterRender` - After render queue
+- `destroy` - Destroy queue
+
+### Component Instrumentation
+
+Non-Glimmer components are automatically tracked:
+
+```javascript
+// app/components/user-profile.js
+import Component from '@ember/component';
+
+export default Component.extend({
+  // Component initialization is automatically tracked
+  init() {
+    this._super(...arguments);
+    // Your code
+  },
+  
+  // didInsertElement to didRender is tracked
+  didInsertElement() {
+    this._super(...arguments);
+    // Your code
+  },
+});
+```
+
+Configuration:
+
+```javascript
+// config/environment.js
+ENV['@sentry/ember'] = {
+  // Disable component tracking
+  disableInstrumentComponents: false,
+  
+  // Set minimum render duration threshold (ms)
+  minimumComponentRenderDuration: 0, // Track all components
+};
+```
+
+### Glimmer Component Tracking
+
+For Glimmer components, enable component definition tracking:
+
+```javascript
+// config/environment.js
+ENV['@sentry/ember'] = {
+  // Show component definitions in traces
+  enableComponentDefinition: true,
+};
+```
+
+## Error Handling
+
+### Automatic Error Capture
+
+Errors are automatically captured:
+
+```javascript
+// app/routes/posts.js
+import Route from '@ember/routing/route';
+
+export default class PostsRoute extends Route {
+  model() {
+    // This error will be automatically captured
+    throw new Error('Failed to load posts');
+  }
+}
+```
+
+### Manual Error Capture
+
+```javascript
+import Component from '@glimmer/component';
+import { action } from '@ember/object';
+import * as Sentry from '@sentry/ember';
+
+export default class FormComponent extends Component {
+  @action
+  async handleSubmit() {
+    try {
+      await this.saveData();
+    } catch (error) {
+      Sentry.captureException(error, {
+        tags: {
+          component: 'FormComponent',
+          action: 'submit',
+        },
+      });
+    }
+  }
+}
+```
+
+## Context & User Information
+
+### Setting User Context
+
+```javascript
+// app/services/session.js
+import Service from '@ember/service';
+import * as Sentry from '@sentry/ember';
+
+export default class SessionService extends Service {
+  async login(credentials) {
+    const user = await this.authenticate(credentials);
+    
+    // Set user context
+    Sentry.setUser({
+      id: user.id,
+      email: user.email,
+      username: user.username,
+    });
+    
+    return user;
+  }
+  
+  logout() {
+    Sentry.setUser(null);
+  }
+}
+```
+
+### Adding Context
+
+```javascript
+import Route from '@ember/routing/route';
+import * as Sentry from '@sentry/ember';
+
+export default class ApplicationRoute extends Route {
+  beforeModel() {
+    // Set global context
+    Sentry.setContext('app', {
+      version: config.APP.version,
+      environment: config.environment,
+    });
+    
+    // Add tags
+    Sentry.setTag('locale', this.intl.locale);
+  }
+}
+```
+
+### Breadcrumbs
+
+```javascript
+import Component from '@glimmer/component';
+import { action } from '@ember/object';
+import * as Sentry from '@sentry/ember';
+
+export default class NavigationComponent extends Component {
+  @action
+  navigate(route) {
+    Sentry.addBreadcrumb({
+      category: 'navigation',
+      message: `User navigated to ${route}`,
+      level: 'info',
+    });
+    
+    this.router.transitionTo(route);
+  }
+}
+```
+
+## Advanced Configuration
+
+<Tabs>
+  <Tab title="Disable Performance">
+    ```javascript
+    // config/environment.js
+    ENV['@sentry/ember'] = {
+      // Disable all automatic performance instrumentation
+      disablePerformance: true,
+    };
+    ```
+  </Tab>
+
+  <Tab title="Fine-tune Thresholds">
+    ```javascript
+    // config/environment.js
+    ENV['@sentry/ember'] = {
+      // Only track runloop queues longer than 10ms
+      minimumRunloopQueueDuration: 10,
+      
+      // Only track components that take longer than 5ms to render
+      minimumComponentRenderDuration: 5,
+    };
+    ```
+  </Tab>
+
+  <Tab title="Enable All Tracking">
+    ```javascript
+    // config/environment.js
+    ENV['@sentry/ember'] = {
+      // Track all runloop queues
+      minimumRunloopQueueDuration: 0,
+      
+      // Track all component renders
+      minimumComponentRenderDuration: 0,
+      
+      // Show component definitions
+      enableComponentDefinition: true,
+    };
+    ```
+  </Tab>
+</Tabs>
+
+## Custom Performance Tracking
+
+```javascript
+import Component from '@glimmer/component';
+import { action } from '@ember/object';
+import * as Sentry from '@sentry/ember';
+
+export default class DataTableComponent extends Component {
+  @action
+  async loadData() {
+    await Sentry.startSpan(
+      {
+        name: 'DataTable.loadData',
+        op: 'ui.ember.component.load',
+      },
+      async () => {
+        const data = await fetch('/api/table-data');
+        this.data = await data.json();
+      },
+    );
+  }
+}
+```
+
+## Session Replay
+
+```javascript
+// app/app.js
+import * as Sentry from '@sentry/ember';
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  
+  integrations: [
+    Sentry.replayIntegration({
+      maskAllText: true,
+      blockAllMedia: true,
+    }),
+  ],
+  
+  tracesSampleRate: 1.0,
+  replaysSessionSampleRate: 0.1,
+  replaysOnErrorSampleRate: 1.0,
+});
+```
+
+## Testing
+
+When testing your Ember app with Sentry:
+
+```javascript
+// tests/test-helper.js
+import Application from '../app';
+import config from '../config/environment';
+import { setApplication } from '@ember/test-helpers';
+import { start } from 'ember-qunit';
+import * as Sentry from '@sentry/ember';
+
+// Initialize Sentry for tests (with disabled transport)
+Sentry.init({
+  dsn: 'https://test@test.ingest.sentry.io/12345',
+  beforeSend: () => null, // Don't send events in tests
+});
+
+setApplication(Application.create(config.APP));
+
+start();
+```
+
+## Supported Versions
+
+- **Ember.js**: v4.0 or above
+- **Node.js**: v14.18 or above
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Route Instrumentation" icon="route">
+    Wrap routes with `instrumentRoutePerformance` to track lifecycle hooks.
+  </Card>
+  
+  <Card title="Threshold Tuning" icon="sliders">
+    Adjust duration thresholds to focus on performance bottlenecks.
+  </Card>
+  
+  <Card title="Component Tracking" icon="layer-group">
+    Enable component definition tracking for Glimmer components.
+  </Card>
+  
+  <Card title="Context" icon="circle-info">
+    Set user and app context in your ApplicationRoute.
+  </Card>
+</CardGroup>
+
+## Configuration Reference
+
+<Accordion title="All Configuration Options">
+  ```javascript
+  // config/environment.js
+  ENV['@sentry/ember'] = {
+    // Performance Settings
+    disablePerformance: false,
+    minimumRunloopQueueDuration: 5, // ms
+    
+    // Component Settings
+    disableInstrumentComponents: false,
+    minimumComponentRenderDuration: 2, // ms
+    enableComponentDefinition: false,
+  };
+  ```
+
+  In `app.js`:
+
+  ```javascript
+  Sentry.init({
+    dsn: 'YOUR_DSN_HERE',
+    
+    // Standard Sentry options
+    environment: 'production',
+    release: 'my-app@1.0.0',
+    tracesSampleRate: 0.2,
+    
+    // Browser SDK options
+    integrations: [
+      Sentry.browserTracingIntegration(),
+      Sentry.replayIntegration(),
+    ],
+    
+    replaysSessionSampleRate: 0.1,
+    replaysOnErrorSampleRate: 1.0,
+  });
+  ```
+</Accordion>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Source Maps" icon="map" href="/sourcemaps">
+    Upload source maps for production builds
+  </Card>
+  
+  <Card title="Performance" icon="gauge-high" href="/performance">
+    Deep dive into performance monitoring
+  </Card>
+  
+  <Card title="Session Replay" icon="video" href="/session-replay">
+    Set up session replay
+  </Card>
+  
+  <Card title="Ember Guides" icon="book" href="https://guides.emberjs.com">
+    Ember.js official documentation
+  </Card>
+</CardGroup>

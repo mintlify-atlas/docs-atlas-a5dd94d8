@@ -1,0 +1,617 @@
+---
+title: Cloudflare SDK
+description: Error monitoring and performance tracking for Cloudflare Workers and Pages
+---
+
+The Sentry Cloudflare SDK provides error monitoring and performance tracking for Cloudflare Workers and Cloudflare Pages applications.
+
+## Installation
+
+```bash
+npm install @sentry/cloudflare
+```
+
+## Prerequisites
+
+Add the `nodejs_als` or `nodejs_compat` compatibility flag to your `wrangler.toml` or `wrangler.jsonc`:
+
+<CodeGroup>
+```toml wrangler.toml
+compatibility_flags = ["nodejs_als"]
+# or
+# compatibility_flags = ["nodejs_compat"]
+```
+
+```jsonc wrangler.jsonc
+{
+  "compatibility_flags": [
+    "nodejs_als"
+    // or "nodejs_compat"
+  ]
+}
+```
+</CodeGroup>
+
+The SDK needs `AsyncLocalStorage` API to work correctly.
+
+## Cloudflare Pages
+
+### Middleware Setup
+
+Add Sentry as middleware in `functions/_middleware.ts`:
+
+```typescript
+// functions/_middleware.ts
+import * as Sentry from '@sentry/cloudflare';
+
+export const onRequest = Sentry.sentryPagesPlugin({
+  dsn: 'YOUR_DSN_HERE',
+  
+  // Performance Monitoring
+  tracesSampleRate: 1.0,
+});
+```
+
+### Multiple Middlewares
+
+Chain multiple middlewares (Sentry should be first):
+
+```typescript
+import * as Sentry from '@sentry/cloudflare';
+import { authMiddleware } from './auth';
+
+export const onRequest = [
+  // Sentry must be first
+  Sentry.sentryPagesPlugin({
+    dsn: 'YOUR_DSN_HERE',
+    tracesSampleRate: 1.0,
+  }),
+  authMiddleware,
+  // ... other middlewares
+];
+```
+
+### Access Environment Variables
+
+```typescript
+import * as Sentry from '@sentry/cloudflare';
+
+export const onRequest = Sentry.sentryPagesPlugin((context) => ({
+  dsn: context.env.SENTRY_DSN,
+  environment: context.env.ENVIRONMENT,
+  tracesSampleRate: 1.0,
+}));
+```
+
+### SvelteKit on Cloudflare
+
+```typescript
+// hooks.server.ts
+import * as Sentry from '@sentry/cloudflare';
+
+export const handle = ({ event, resolve }) => {
+  const requestHandlerOptions = {
+    options: {
+      dsn: event.platform.env.SENTRY_DSN,
+      tracesSampleRate: 1.0,
+    },
+    request: event.request,
+    context: event.platform.ctx,
+  };
+  
+  return Sentry.wrapRequestHandler(requestHandlerOptions, () => resolve(event));
+};
+```
+
+## Cloudflare Workers
+
+### Basic Setup
+
+Wrap your worker handler with `withSentry`:
+
+```typescript
+import * as Sentry from '@sentry/cloudflare';
+
+export default Sentry.withSentry(
+  (env) => ({
+    dsn: env.SENTRY_DSN,
+    tracesSampleRate: 1.0,
+  }),
+  {
+    async fetch(request, env, ctx) {
+      return new Response('Hello World!');
+    },
+  } satisfies ExportedHandler<Env>,
+);
+```
+
+### Full Worker Example
+
+```typescript
+import * as Sentry from '@sentry/cloudflare';
+
+interface Env {
+  SENTRY_DSN: string;
+  ENVIRONMENT: string;
+}
+
+export default Sentry.withSentry(
+  (env: Env) => ({
+    dsn: env.SENTRY_DSN,
+    environment: env.ENVIRONMENT,
+    tracesSampleRate: 1.0,
+  }),
+  {
+    async fetch(request: Request, env: Env, ctx: ExecutionContext) {
+      try {
+        const url = new URL(request.url);
+        
+        // Add context
+        Sentry.setContext('request', {
+          method: request.method,
+          url: request.url,
+          path: url.pathname,
+        });
+        
+        if (url.pathname === '/error') {
+          throw new Error('Test error');
+        }
+        
+        return new Response('Success', { status: 200 });
+      } catch (error) {
+        Sentry.captureException(error);
+        return new Response('Error', { status: 500 });
+      }
+    },
+    
+    async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
+      // Handle scheduled events
+    },
+  } satisfies ExportedHandler<Env>,
+);
+```
+
+## Cloudflare D1 Integration
+
+Instrument D1 database operations:
+
+```typescript
+import * as Sentry from '@sentry/cloudflare';
+
+interface Env {
+  DB: D1Database;
+  SENTRY_DSN: string;
+}
+
+export default Sentry.withSentry(
+  (env) => ({ dsn: env.SENTRY_DSN }),
+  {
+    async fetch(request, env, ctx) {
+      // Instrument D1 with Sentry
+      const db = Sentry.instrumentD1WithSentry(env.DB);
+      
+      // Now use the database as usual
+      // All queries will be tracked automatically
+      const users = await db
+        .prepare('SELECT * FROM users WHERE id = ?')
+        .bind(1)
+        .all();
+      
+      return Response.json(users);
+    },
+  },
+);
+```
+
+## Cron Monitoring
+
+Monitor scheduled tasks with Sentry Crons:
+
+```typescript
+import * as Sentry from '@sentry/cloudflare';
+
+export default Sentry.withSentry(
+  (env) => ({ dsn: env.SENTRY_DSN }),
+  {
+    async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
+      ctx.waitUntil(
+        Sentry.withMonitor(
+          'cleanup-job',
+          async () => {
+            await performCleanup();
+          },
+          {
+            schedule: {
+              type: 'crontab',
+              value: '*/30 * * * *',
+            },
+            checkinMargin: 2,
+            maxRuntime: 10,
+            timezone: 'America/Los_Angeles',
+          },
+        ),
+      );
+    },
+  },
+);
+```
+
+## Performance Monitoring
+
+### Custom Spans
+
+```typescript
+import * as Sentry from '@sentry/cloudflare';
+
+export default Sentry.withSentry(
+  (env) => ({ dsn: env.SENTRY_DSN }),
+  {
+    async fetch(request, env, ctx) {
+      return await Sentry.startSpan(
+        {
+          name: 'http.server',
+          op: 'http.server',
+          attributes: {
+            'http.method': request.method,
+            'http.url': request.url,
+          },
+        },
+        async () => {
+          const data = await Sentry.startSpan(
+            { name: 'fetch-data', op: 'db.query' },
+            async () => {
+              return await env.DB.prepare('SELECT * FROM data').all();
+            },
+          );
+          
+          return Response.json(data);
+        },
+      );
+    },
+  },
+);
+```
+
+## Context & User Information
+
+### Set User Context
+
+```typescript
+import * as Sentry from '@sentry/cloudflare';
+
+export default Sentry.withSentry(
+  (env) => ({ dsn: env.SENTRY_DSN }),
+  {
+    async fetch(request, env, ctx) {
+      // Extract user from request
+      const userId = request.headers.get('x-user-id');
+      
+      if (userId) {
+        Sentry.setUser({
+          id: userId,
+        });
+      }
+      
+      // Your handler code
+    },
+  },
+);
+```
+
+### Add Context & Tags
+
+```typescript
+import * as Sentry from '@sentry/cloudflare';
+
+Sentry.setContext('cloudflare', {
+  colo: request.cf?.colo,
+  country: request.cf?.country,
+  city: request.cf?.city,
+});
+
+Sentry.setTag('edge_location', request.cf?.colo);
+Sentry.setTag('country', request.cf?.country);
+```
+
+### Breadcrumbs
+
+```typescript
+import * as Sentry from '@sentry/cloudflare';
+
+Sentry.addBreadcrumb({
+  category: 'cache',
+  message: 'Cache miss',
+  level: 'info',
+  data: {
+    key: cacheKey,
+  },
+});
+```
+
+## Cloudflare KV
+
+Track KV operations:
+
+```typescript
+import * as Sentry from '@sentry/cloudflare';
+
+interface Env {
+  KV: KVNamespace;
+  SENTRY_DSN: string;
+}
+
+export default Sentry.withSentry(
+  (env) => ({ dsn: env.SENTRY_DSN }),
+  {
+    async fetch(request, env, ctx) {
+      const value = await Sentry.startSpan(
+        {
+          name: 'kv.get',
+          op: 'db.query',
+          attributes: {
+            'db.system': 'cloudflare-kv',
+          },
+        },
+        async () => {
+          return await env.KV.get('key');
+        },
+      );
+      
+      return Response.json({ value });
+    },
+  },
+);
+```
+
+## Cloudflare R2
+
+Track R2 operations:
+
+```typescript
+import * as Sentry from '@sentry/cloudflare';
+
+interface Env {
+  BUCKET: R2Bucket;
+  SENTRY_DSN: string;
+}
+
+export default Sentry.withSentry(
+  (env) => ({ dsn: env.SENTRY_DSN }),
+  {
+    async fetch(request, env, ctx) {
+      const object = await Sentry.startSpan(
+        {
+          name: 'r2.get',
+          op: 'storage.get',
+          attributes: {
+            'storage.system': 'cloudflare-r2',
+          },
+        },
+        async () => {
+          return await env.BUCKET.get('file.txt');
+        },
+      );
+      
+      return new Response(object?.body);
+    },
+  },
+);
+```
+
+## Durable Objects
+
+Instrument Durable Objects:
+
+```typescript
+import * as Sentry from '@sentry/cloudflare';
+
+export class Counter {
+  private state: DurableObjectState;
+  private env: Env;
+  private count = 0;
+  
+  constructor(state: DurableObjectState, env: Env) {
+    this.state = state;
+    this.env = env;
+    
+    Sentry.init({
+      dsn: env.SENTRY_DSN,
+    });
+  }
+  
+  async fetch(request: Request) {
+    try {
+      return await Sentry.startSpan(
+        { name: 'durable-object.fetch', op: 'function' },
+        async () => {
+          this.count++;
+          return Response.json({ count: this.count });
+        },
+      );
+    } catch (error) {
+      Sentry.captureException(error);
+      return new Response('Error', { status: 500 });
+    }
+  }
+}
+```
+
+## Source Maps
+
+Configure source map upload:
+
+```bash
+npx @sentry/wizard@latest -i sourcemaps
+```
+
+Or manually in `wrangler.toml`:
+
+```toml
+[build]
+command = "npm run build"
+
+[build.upload]
+format = "service-worker"
+main = "./dist/index.js"
+```
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Middleware First" icon="layer-group">
+    Always place Sentry middleware first in the chain.
+  </Card>
+  
+  <Card title="Environment Variables" icon="key">
+    Store your DSN in environment variables, not in code.
+  </Card>
+  
+  <Card title="Instrument Storage" icon="database">
+    Use `instrumentD1WithSentry` to track database queries.
+  </Card>
+  
+  <Card title="Monitor Crons" icon="clock">
+    Use `withMonitor` to track scheduled tasks.
+  </Card>
+</CardGroup>
+
+## Configuration
+
+<Accordion title="Complete Configuration">
+  ```typescript
+  import * as Sentry from '@sentry/cloudflare';
+
+  // Cloudflare Workers
+  export default Sentry.withSentry(
+    (env) => ({
+      dsn: env.SENTRY_DSN,
+      
+      // Environment
+      environment: env.ENVIRONMENT || 'production',
+      release: env.VERSION,
+      
+      // Performance
+      tracesSampleRate: 0.2,
+      
+      // Error filtering
+      ignoreErrors: [
+        'AbortError',
+      ],
+      
+      beforeSend(event, hint) {
+        // Filter or modify events
+        if (event.request) {
+          delete event.request.cookies;
+        }
+        return event;
+      },
+    }),
+    {
+      async fetch(request, env, ctx) {
+        // Your handler
+      },
+    },
+  );
+
+  // Cloudflare Pages
+  export const onRequest = Sentry.sentryPagesPlugin((context) => ({
+    dsn: context.env.SENTRY_DSN,
+    environment: context.env.ENVIRONMENT,
+    tracesSampleRate: 0.2,
+    
+    beforeSend(event) {
+      // Filter events
+      return event;
+    },
+  }));
+  ```
+</Accordion>
+
+## Common Patterns
+
+<Tabs>
+  <Tab title="API Routes">
+    ```typescript
+    import * as Sentry from '@sentry/cloudflare';
+
+    const routes = {
+      '/api/users': handleUsers,
+      '/api/posts': handlePosts,
+    };
+
+    export default Sentry.withSentry(
+      (env) => ({ dsn: env.SENTRY_DSN }),
+      {
+        async fetch(request, env, ctx) {
+          const url = new URL(request.url);
+          const handler = routes[url.pathname];
+          
+          if (!handler) {
+            return new Response('Not Found', { status: 404 });
+          }
+          
+          try {
+            return await handler(request, env, ctx);
+          } catch (error) {
+            Sentry.captureException(error);
+            return new Response('Error', { status: 500 });
+          }
+        },
+      },
+    );
+    ```
+  </Tab>
+
+  <Tab title="Authentication">
+    ```typescript
+    import * as Sentry from '@sentry/cloudflare';
+
+    export default Sentry.withSentry(
+      (env) => ({ dsn: env.SENTRY_DSN }),
+      {
+        async fetch(request, env, ctx) {
+          const token = request.headers.get('authorization');
+          
+          if (!token) {
+            return new Response('Unauthorized', { status: 401 });
+          }
+          
+          try {
+            const user = await verifyToken(token);
+            
+            Sentry.setUser({
+              id: user.id,
+              email: user.email,
+            });
+            
+            // Process request
+          } catch (error) {
+            Sentry.captureException(error);
+            return new Response('Invalid token', { status: 401 });
+          }
+        },
+      },
+    );
+    ```
+  </Tab>
+</Tabs>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Cloudflare Docs" icon="book" href="https://developers.cloudflare.com/workers/">
+    Official Cloudflare Workers documentation
+  </Card>
+  
+  <Card title="D1 Database" icon="database" href="https://developers.cloudflare.com/d1/">
+    Learn about Cloudflare D1
+  </Card>
+  
+  <Card title="Source Maps" icon="map" href="/sourcemaps">
+    Upload source maps for production
+  </Card>
+  
+  <Card title="Performance" icon="gauge-high" href="/performance">
+    Performance monitoring guide
+  </Card>
+</CardGroup>

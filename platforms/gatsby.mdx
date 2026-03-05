@@ -1,0 +1,493 @@
+---
+title: Gatsby SDK
+description: Error monitoring and performance tracking for Gatsby applications
+---
+
+The Sentry Gatsby SDK provides error monitoring and performance tracking for Gatsby applications with automatic source map upload and build-time integration.
+
+## Installation
+
+<CodeGroup>
+```bash npm
+npm install @sentry/gatsby
+```
+
+```bash yarn
+yarn add @sentry/gatsby
+```
+
+```bash pnpm
+pnpm add @sentry/gatsby
+```
+</CodeGroup>
+
+## Basic Setup
+
+### Register as Plugin
+
+Add Sentry to your `gatsby-config.js`:
+
+```javascript
+module.exports = {
+  plugins: [
+    {
+      resolve: '@sentry/gatsby',
+      options: {
+        dsn: process.env.SENTRY_DSN,
+        
+        // Performance Monitoring
+        tracesSampleRate: 1.0,
+        
+        // Source Maps
+        release: process.env.SENTRY_RELEASE,
+        
+        // Optional: Disable client webpack plugin
+        enableClientWebpackPlugin: true,
+        
+        // Optional: Delete source maps after upload
+        deleteSourcemapsAfterUpload: false,
+      },
+    },
+    // Your other plugins
+  ],
+};
+```
+
+### Initialize Sentry
+
+Create `gatsby-browser.js` and `gatsby-ssr.js`:
+
+```javascript
+// gatsby-browser.js
+import * as Sentry from '@sentry/gatsby';
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  
+  integrations: [
+    Sentry.browserTracingIntegration(),
+    Sentry.replayIntegration(),
+  ],
+  
+  // Performance Monitoring
+  tracesSampleRate: 1.0,
+  tracePropagationTargets: ['localhost', /^https:\/\/yourserver\.io\/api/],
+  
+  // Session Replay
+  replaysSessionSampleRate: 0.1,
+  replaysOnErrorSampleRate: 1.0,
+});
+```
+
+```javascript
+// gatsby-ssr.js
+import * as Sentry from '@sentry/gatsby';
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  tracesSampleRate: 1.0,
+});
+```
+
+## Plugin Configuration
+
+### Basic Options
+
+```javascript
+// gatsby-config.js
+module.exports = {
+  plugins: [
+    {
+      resolve: '@sentry/gatsby',
+      options: {
+        dsn: process.env.SENTRY_DSN,
+        
+        // Sentry configuration
+        environment: process.env.NODE_ENV,
+        release: process.env.SENTRY_RELEASE,
+        
+        // Source map upload
+        enableClientWebpackPlugin: true,
+        deleteSourcemapsAfterUpload: true,
+        
+        // Webpack plugin options
+        org: process.env.SENTRY_ORG,
+        project: process.env.SENTRY_PROJECT,
+        authToken: process.env.SENTRY_AUTH_TOKEN,
+      },
+    },
+  ],
+};
+```
+
+### Disable Source Map Upload
+
+To disable automatic source map upload:
+
+```javascript
+{
+  resolve: '@sentry/gatsby',
+  options: {
+    dsn: process.env.SENTRY_DSN,
+    enableClientWebpackPlugin: false,
+  },
+}
+```
+
+## Error Handling
+
+### React Component Errors
+
+Use ErrorBoundary to catch React errors:
+
+```javascript
+import React from 'react';
+import * as Sentry from '@sentry/gatsby';
+
+function FallbackComponent({ error, resetError }) {
+  return (
+    <div>
+      <h1>Something went wrong</h1>
+      <button onClick={resetError}>Try again</button>
+    </div>
+  );
+}
+
+function MyApp({ children }) {
+  return (
+    <Sentry.ErrorBoundary fallback={FallbackComponent} showDialog>
+      {children}
+    </Sentry.ErrorBoundary>
+  );
+}
+
+export default MyApp;
+```
+
+### Page Component Errors
+
+```javascript
+// src/pages/products.js
+import React, { useEffect, useState } from 'react';
+import * as Sentry from '@sentry/gatsby';
+
+function ProductsPage() {
+  const [products, setProducts] = useState([]);
+  
+  useEffect(() => {
+    async function fetchProducts() {
+      try {
+        const response = await fetch('/api/products');
+        const data = await response.json();
+        setProducts(data);
+      } catch (error) {
+        Sentry.captureException(error);
+      }
+    }
+    
+    fetchProducts();
+  }, []);
+  
+  return (
+    <div>
+      <h1>Products</h1>
+      {products.map(product => (
+        <div key={product.id}>{product.name}</div>
+      ))}
+    </div>
+  );
+}
+
+export default ProductsPage;
+```
+
+### Gatsby API Errors
+
+```javascript
+// gatsby-node.js
+import * as Sentry from '@sentry/gatsby';
+
+export const createPages = async ({ graphql, actions }) => {
+  const { createPage } = actions;
+  
+  try {
+    const result = await graphql(`
+      query {
+        allMarkdownRemark {
+          nodes {
+            id
+            frontmatter {
+              slug
+            }
+          }
+        }
+      }
+    `);
+    
+    if (result.errors) {
+      Sentry.captureException(result.errors);
+      throw result.errors;
+    }
+    
+    result.data.allMarkdownRemark.nodes.forEach(node => {
+      createPage({
+        path: node.frontmatter.slug,
+        component: require.resolve('./src/templates/blog-post.js'),
+        context: { id: node.id },
+      });
+    });
+  } catch (error) {
+    Sentry.captureException(error);
+    throw error;
+  }
+};
+```
+
+## Performance Monitoring
+
+### Route Changes
+
+Route changes are automatically tracked with `browserTracingIntegration`.
+
+### Custom Transactions
+
+```javascript
+import * as Sentry from '@sentry/gatsby';
+
+export async function fetchUserData(userId) {
+  return await Sentry.startSpan(
+    {
+      name: 'fetch-user-data',
+      op: 'http.client',
+      attributes: {
+        userId,
+      },
+    },
+    async () => {
+      const response = await fetch(`/api/users/${userId}`);
+      return response.json();
+    },
+  );
+}
+```
+
+### GraphQL Query Tracking
+
+```javascript
+import * as Sentry from '@sentry/gatsby';
+import { useStaticQuery, graphql } from 'gatsby';
+
+function MyComponent() {
+  return Sentry.startSpan(
+    { name: 'graphql-query', op: 'graphql' },
+    () => {
+      const data = useStaticQuery(graphql`
+        query {
+          site {
+            siteMetadata {
+              title
+            }
+          }
+        }
+      `);
+      
+      return <h1>{data.site.siteMetadata.title}</h1>;
+    },
+  );
+}
+```
+
+## Context and User Information
+
+### Setting User Context
+
+```javascript
+// gatsby-browser.js
+import * as Sentry from '@sentry/gatsby';
+
+export const onClientEntry = () => {
+  // Set user from authentication
+  const user = getCurrentUser();
+  
+  if (user) {
+    Sentry.setUser({
+      id: user.id,
+      email: user.email,
+      username: user.username,
+    });
+  }
+};
+```
+
+### Route Context
+
+```javascript
+// gatsby-browser.js
+import * as Sentry from '@sentry/gatsby';
+
+export const onRouteUpdate = ({ location, prevLocation }) => {
+  Sentry.setContext('navigation', {
+    from: prevLocation?.pathname,
+    to: location.pathname,
+  });
+  
+  Sentry.setTag('route', location.pathname);
+};
+```
+
+## Environment Variables
+
+Create a `.env.production` file:
+
+```bash
+# Required
+SENTRY_DSN=your-dsn-here
+
+# For source maps
+SENTRY_ORG=your-org
+SENTRY_PROJECT=your-project
+SENTRY_AUTH_TOKEN=your-auth-token
+
+# Optional
+SENTRY_RELEASE=1.0.0
+SENTRY_ENVIRONMENT=production
+```
+
+Make DSN available to browser:
+
+```javascript
+// gatsby-config.js
+module.exports = {
+  plugins: [
+    {
+      resolve: 'gatsby-plugin-env-variables',
+      options: {
+        allowList: ['SENTRY_DSN'],
+      },
+    },
+  ],
+};
+```
+
+## Source Maps
+
+### Automatic Upload
+
+Source maps are automatically uploaded when:
+
+```javascript
+// gatsby-config.js
+{
+  resolve: '@sentry/gatsby',
+  options: {
+    dsn: process.env.SENTRY_DSN,
+    enableClientWebpackPlugin: true,
+    org: process.env.SENTRY_ORG,
+    project: process.env.SENTRY_PROJECT,
+    authToken: process.env.SENTRY_AUTH_TOKEN,
+  },
+}
+```
+
+### Clean Up Source Maps
+
+Delete source maps after upload:
+
+```javascript
+{
+  resolve: '@sentry/gatsby',
+  options: {
+    dsn: process.env.SENTRY_DSN,
+    deleteSourcemapsAfterUpload: true,
+  },
+}
+```
+
+## Gatsby Cloud
+
+For Gatsby Cloud deployments:
+
+1. Add environment variables in Gatsby Cloud dashboard
+2. Enable build webhook notifications
+3. Configure release tracking:
+
+```javascript
+// gatsby-config.js
+module.exports = {
+  plugins: [
+    {
+      resolve: '@sentry/gatsby',
+      options: {
+        dsn: process.env.SENTRY_DSN,
+        release: process.env.GATSBY_CLOUD_COMMIT_SHA,
+      },
+    },
+  ],
+};
+```
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="ErrorBoundary" icon="shield">
+    Wrap your app layout with ErrorBoundary for global error catching.
+  </Card>
+  
+  <Card title="Source Maps" icon="map">
+    Enable source map upload for production builds.
+  </Card>
+  
+  <Card title="User Context" icon="user">
+    Set user context in onClientEntry hook.
+  </Card>
+  
+  <Card title="Route Tracking" icon="route">
+    Use onRouteUpdate to track navigation context.
+  </Card>
+</CardGroup>
+
+## Troubleshooting
+
+<Accordion title="Plugin Not Loading">
+  Ensure:
+  
+  1. Plugin is in gatsby-config.js plugins array
+  2. Package is installed correctly
+  3. DSN is set in options or environment
+</Accordion>
+
+<Accordion title="Source Maps Not Uploaded">
+  Verify:
+  
+  1. `enableClientWebpackPlugin: true`
+  2. `SENTRY_AUTH_TOKEN` is set
+  3. `org` and `project` are correct
+</Accordion>
+
+<Accordion title="Build Errors">
+  Check:
+  
+  1. Gatsby and React versions are compatible
+  2. All peer dependencies are installed
+  3. Webpack configuration isn't conflicting
+</Accordion>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="ErrorBoundary" icon="shield" href="/error-boundary">
+    Advanced error boundary patterns
+  </Card>
+  
+  <Card title="GraphQL" icon="database" href="/graphql">
+    Track GraphQL query performance
+  </Card>
+  
+  <Card title="Session Replay" icon="video" href="/session-replay">
+    Debug with session recordings
+  </Card>
+  
+  <Card title="Gatsby Cloud" icon="cloud" href="/gatsby-cloud">
+    Configure for Gatsby Cloud deployments
+  </Card>
+</CardGroup>

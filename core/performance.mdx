@@ -1,0 +1,410 @@
+---
+title: "Performance Monitoring"
+description: "Track and measure your application's performance with Sentry"
+---
+
+Performance monitoring helps you track the speed and reliability of your application. Sentry captures performance data through transactions and spans, giving you insights into what's slow and why.
+
+## Getting Started
+
+Enable performance monitoring during SDK initialization:
+
+```javascript
+import * as Sentry from '@sentry/browser';
+
+Sentry.init({
+  dsn: 'your-dsn',
+  
+  // Performance Monitoring
+  tracesSampleRate: 1.0, // Capture 100% of transactions for performance monitoring
+  
+  // Session Replay
+  replaysSessionSampleRate: 0.1, // Capture 10% of all sessions
+  replaysOnErrorSampleRate: 1.0 // Capture 100% of sessions with errors
+});
+```
+
+<Note>
+In production, adjust `tracesSampleRate` to a lower value (e.g., 0.1 for 10%) to reduce data volume and costs.
+</Note>
+
+## Sampling
+
+### Uniform Sample Rate
+
+Set a fixed sample rate for all transactions:
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  tracesSampleRate: 0.2 // Sample 20% of transactions
+});
+```
+
+### Dynamic Sampling
+
+Use a function to dynamically sample transactions:
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  tracesSampler: (samplingContext) => {
+    // Sample 100% of checkout transactions
+    if (samplingContext.name?.includes('checkout')) {
+      return 1.0;
+    }
+    
+    // Sample 100% of transactions with errors
+    if (samplingContext.parentSampled === true) {
+      return 1.0;
+    }
+    
+    // Sample 10% of everything else
+    return 0.1;
+  }
+});
+```
+
+<Tip>
+Use `tracesSampler` for fine-grained control over which transactions to sample based on their context.
+</Tip>
+
+## Transactions
+
+Transactions represent a single instance of a service being called. Use `startSpan` to create transactions:
+
+```javascript
+import * as Sentry from '@sentry/browser';
+
+const result = Sentry.startSpan(
+  {
+    name: 'process_order',
+    op: 'function'
+  },
+  (span) => {
+    // Your code here
+    const order = processOrder();
+    return order;
+  }
+);
+```
+
+### Transaction Operations
+
+Use standard operation names for consistency:
+
+```javascript
+// HTTP requests
+Sentry.startSpan({ name: 'GET /api/users', op: 'http.client' }, () => {
+  // ...
+});
+
+// Database queries
+Sentry.startSpan({ name: 'SELECT * FROM users', op: 'db.query' }, () => {
+  // ...
+});
+
+// Functions
+Sentry.startSpan({ name: 'calculateTotal', op: 'function' }, () => {
+  // ...
+});
+
+// UI rendering
+Sentry.startSpan({ name: 'render_component', op: 'ui.react.render' }, () => {
+  // ...
+});
+```
+
+### Async Operations
+
+Transactions work seamlessly with async code:
+
+```javascript
+const userData = await Sentry.startSpan(
+  { name: 'fetch_user_data', op: 'http.client' },
+  async (span) => {
+    const response = await fetch('/api/user');
+    const data = await response.json();
+    
+    // Add custom data to the span
+    span.setAttribute('user.id', data.id);
+    span.setAttribute('http.status_code', response.status);
+    
+    return data;
+  }
+);
+```
+
+## Measuring Operations
+
+### Basic Timing
+
+Measure how long operations take:
+
+```javascript
+Sentry.startSpan({ name: 'process_payment', op: 'payment' }, (span) => {
+  // Validate payment
+  validatePaymentInfo();
+  
+  // Charge card
+  const result = chargeCard();
+  
+  // Send receipt
+  sendReceipt();
+  
+  return result;
+});
+```
+
+### Nested Operations
+
+Create child spans for detailed timing:
+
+```javascript
+Sentry.startSpan({ name: 'checkout', op: 'function' }, () => {
+  // Validate cart
+  Sentry.startSpan({ name: 'validate_cart', op: 'function' }, () => {
+    validateCart();
+  });
+  
+  // Calculate total
+  const total = Sentry.startSpan({ name: 'calculate_total', op: 'function' }, () => {
+    return calculateTotal();
+  });
+  
+  // Process payment
+  Sentry.startSpan({ name: 'process_payment', op: 'payment' }, () => {
+    processPayment(total);
+  });
+});
+```
+
+## Span Attributes
+
+Add custom data to spans:
+
+```javascript
+Sentry.startSpan({ name: 'fetch_products', op: 'http.client' }, (span) => {
+  span.setAttribute('category', 'electronics');
+  span.setAttribute('limit', 10);
+  span.setAttribute('user.premium', true);
+  
+  const products = fetchProducts({ category: 'electronics', limit: 10 });
+  
+  span.setAttribute('result.count', products.length);
+  
+  return products;
+});
+```
+
+<Note>
+Span attributes are searchable and can be used for filtering and grouping in the Sentry UI.
+</Note>
+
+## Span Status
+
+Set the status of a span to indicate success or failure:
+
+```javascript
+Sentry.startSpan({ name: 'api_request', op: 'http.client' }, (span) => {
+  try {
+    const response = fetch('/api/data');
+    span.setStatus({ code: 1, message: 'ok' }); // OK
+    return response;
+  } catch (error) {
+    span.setStatus({ code: 2, message: 'internal_error' }); // Error
+    throw error;
+  }
+});
+```
+
+### Status Codes
+
+- `0` - `UNSET`: Default status
+- `1` - `OK`: Success
+- `2` - `ERROR`: Error occurred
+
+## HTTP Status Codes
+
+Automatically set span status from HTTP responses:
+
+```javascript
+import { setHttpStatus } from '@sentry/browser';
+
+Sentry.startSpan({ name: 'GET /api/users', op: 'http.client' }, async (span) => {
+  const response = await fetch('/api/users');
+  
+  // Set status based on HTTP status code
+  setHttpStatus(span, response.status);
+  
+  return response.json();
+});
+```
+
+## Custom Measurements
+
+Add custom measurements to spans:
+
+```javascript
+import { setMeasurement } from '@sentry/browser';
+
+Sentry.startSpan({ name: 'render_page', op: 'ui.render' }, (span) => {
+  const startMemory = performance.memory?.usedJSHeapSize;
+  
+  renderPage();
+  
+  const endMemory = performance.memory?.usedJSHeapSize;
+  const memoryUsed = endMemory - startMemory;
+  
+  // Add custom measurement
+  setMeasurement('memory_used', memoryUsed, 'byte');
+});
+```
+
+## Suppressing Tracing
+
+Temporarily disable tracing for specific operations:
+
+```javascript
+import { suppressTracing } from '@sentry/browser';
+
+suppressTracing(() => {
+  // No spans will be created inside this callback
+  internalOperation();
+  debugLogging();
+});
+```
+
+<Warning>
+Use `suppressTracing` sparingly and only when you need to prevent instrumentation of internal operations that would create noise.
+</Warning>
+
+## Getting Active Span
+
+Access the currently active span:
+
+```javascript
+import { getActiveSpan, spanToJSON } from '@sentry/browser';
+
+Sentry.startSpan({ name: 'parent_operation' }, () => {
+  const activeSpan = getActiveSpan();
+  
+  if (activeSpan) {
+    // Get span details
+    const spanData = spanToJSON(activeSpan);
+    console.log('Trace ID:', spanData.trace_id);
+    console.log('Span ID:', spanData.span_id);
+    
+    // Add attributes to active span
+    activeSpan.setAttribute('custom', 'value');
+  }
+  
+  // Child spans will be children of this span
+  Sentry.startSpan({ name: 'child_operation' }, () => {
+    // ...
+  });
+});
+```
+
+## Integration Examples
+
+### React Component
+
+```javascript
+import * as Sentry from '@sentry/react';
+
+function UserProfile({ userId }) {
+  const [user, setUser] = React.useState(null);
+  
+  React.useEffect(() => {
+    Sentry.startSpan(
+      { name: 'UserProfile.load', op: 'ui.react.component' },
+      async () => {
+        const userData = await Sentry.startSpan(
+          { name: 'fetch_user', op: 'http.client' },
+          () => fetch(`/api/users/${userId}`).then(r => r.json())
+        );
+        
+        setUser(userData);
+      }
+    );
+  }, [userId]);
+  
+  if (!user) return <div>Loading...</div>;
+  
+  return <div>{user.name}</div>;
+}
+```
+
+### Express.js Route
+
+```javascript
+import * as Sentry from '@sentry/node';
+import express from 'express';
+
+const app = express();
+
+app.get('/api/users/:id', async (req, res) => {
+  await Sentry.startSpan(
+    {
+      name: 'GET /api/users/:id',
+      op: 'http.server',
+      attributes: {
+        'http.method': 'GET',
+        'http.route': '/api/users/:id',
+        'user.id': req.params.id
+      }
+    },
+    async (span) => {
+      // Query database
+      const user = await Sentry.startSpan(
+        { name: 'SELECT users', op: 'db.query' },
+        () => db.users.findById(req.params.id)
+      );
+      
+      span.setAttribute('user.found', !!user);
+      
+      res.json(user);
+    }
+  );
+});
+```
+
+## Best Practices
+
+1. **Use descriptive names**: Name transactions and spans clearly to understand what they measure
+2. **Set appropriate operations**: Use standard operation names for consistency
+3. **Add relevant attributes**: Include data that helps identify slow operations
+4. **Sample wisely**: Balance data volume with coverage needs
+5. **Measure meaningful operations**: Focus on user-facing and critical operations
+6. **Keep spans focused**: Each span should represent a single logical operation
+
+## Performance Impact
+
+Sentry's performance monitoring is designed to have minimal impact:
+
+- Lightweight instrumentation
+- Efficient sampling
+- Async processing
+- No blocking operations
+
+<Tip>
+Start with a higher sample rate in development and lower it in production based on your traffic and needs.
+</Tip>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Tracing" icon="route" href="/core/tracing">
+    Learn about distributed tracing
+  </Card>
+  <Card title="Spans" icon="clock" href="/core/spans">
+    Deep dive into spans and instrumentation
+  </Card>
+  <Card title="Distributed Tracing" icon="network-wired" href="/core/distributed-tracing">
+    Track requests across services
+  </Card>
+  <Card title="Session Replay" icon="video" href="/core/session-replay">
+    Combine performance data with session replay
+  </Card>
+</CardGroup>

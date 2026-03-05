@@ -1,0 +1,361 @@
+---
+title: "Integrations"
+description: "Extend Sentry SDK functionality with integrations"
+---
+
+Integrations extend the Sentry SDK with additional functionality like automatic instrumentation, error filtering, and context enrichment.
+
+## Overview
+
+Integrations provide:
+- Automatic instrumentation (HTTP, database, etc.)
+- Error filtering and processing
+- Context enrichment
+- Framework-specific features
+- Custom event processing
+
+## Integration Interface
+
+```typescript
+export interface Integration {
+  /**
+   * The name of the integration.
+   */
+  name: string;
+
+  /**
+   * This hook is only called once, even if multiple clients are created.
+   * It does not receive a client argument, and should not rely on client state.
+   */
+  setupOnce?(): void;
+
+  /**
+   * Set up an integration for the given client.
+   * Receives the client and the integration index as arguments.
+   */
+  setup?(client: Client): void;
+
+  /**
+   * This hook is triggered after all integrations have been set up.
+   * You can use it to e.g. register handlers.
+   */
+  afterAllSetup?(client: Client): void;
+
+  /**
+   * An optional hook to process events.
+   */
+  processEvent?(event: Event, hint: EventHint, client: Client): Event | PromiseLike<Event | null> | null;
+}
+```
+
+## Adding Integrations
+
+### During Initialization
+
+```typescript
+import * as Sentry from '@sentry/node';
+import { httpIntegration, captureConsoleIntegration } from '@sentry/node';
+
+Sentry.init({
+  dsn: 'your-dsn',
+  integrations: [
+    httpIntegration(),
+    captureConsoleIntegration({ levels: ['error', 'warn'] })
+  ]
+});
+```
+
+### Adding at Runtime
+
+```typescript
+import { getClient } from '@sentry/node';
+import { httpIntegration } from '@sentry/node';
+
+const client = getClient();
+if (client) {
+  client.addIntegration(httpIntegration());
+}
+```
+
+## Built-in Integrations
+
+### HTTP Instrumentation
+
+Automatically captures HTTP requests:
+
+```typescript
+import { httpIntegration } from '@sentry/node';
+
+httpIntegration({
+  // Ignore specific URLs
+  ignoreOutgoingRequests: (url) => {
+    return url.includes('healthcheck');
+  },
+  
+  // Capture request/response bodies
+  breadcrumbs: true,
+  tracing: true
+})
+```
+
+### Capture Console
+
+Captures console messages as breadcrumbs:
+
+```typescript
+import { captureConsoleIntegration } from '@sentry/node';
+
+captureConsoleIntegration({
+  levels: ['error', 'warn', 'info']
+})
+```
+
+### Context Lines
+
+Adds source code context to stack traces:
+
+```typescript
+import { contextLinesIntegration } from '@sentry/node';
+
+contextLinesIntegration({
+  frameContextLines: 5 // Lines before and after
+})
+```
+
+### Modules
+
+Adds module information to events:
+
+```typescript
+import { modulesIntegration } from '@sentry/node';
+
+modulesIntegration()
+```
+
+## Creating Custom Integrations
+
+### Basic Integration
+
+```typescript
+import { defineIntegration, getClient } from '@sentry/core';
+import type { Integration, IntegrationFn } from '@sentry/types';
+
+const _customIntegration = (() => {
+  return {
+    name: 'CustomIntegration',
+    
+    setupOnce() {
+      // Called once when the SDK is initialized
+      console.log('Custom integration setup');
+    },
+    
+    setup(client) {
+      // Called when integration is added to a client
+      client.on('beforeSendEvent', (event) => {
+        // Modify events before sending
+        event.tags = { ...event.tags, custom: 'true' };
+      });
+    },
+    
+    afterAllSetup(client) {
+      // Called after all integrations are set up
+      console.log('All integrations ready');
+    }
+  } satisfies Integration;
+}) satisfies IntegrationFn;
+
+export const customIntegration = defineIntegration(_customIntegration);
+```
+
+### Event Processing Integration
+
+```typescript
+import { defineIntegration } from '@sentry/core';
+import type { Event, EventHint, Integration, IntegrationFn } from '@sentry/types';
+
+interface FilterOptions {
+  allowedDomains: string[];
+}
+
+const _domainFilterIntegration = ((options: FilterOptions) => {
+  return {
+    name: 'DomainFilterIntegration',
+    
+    processEvent(event: Event, hint: EventHint): Event | null {
+      // Filter events based on domain
+      const url = event.request?.url;
+      if (!url) return event;
+      
+      const isAllowed = options.allowedDomains.some(domain => 
+        url.includes(domain)
+      );
+      
+      return isAllowed ? event : null;
+    }
+  } satisfies Integration;
+}) satisfies IntegrationFn;
+
+export const domainFilterIntegration = defineIntegration(_domainFilterIntegration);
+
+// Usage
+Sentry.init({
+  dsn: 'your-dsn',
+  integrations: [
+    domainFilterIntegration({
+      allowedDomains: ['myapp.com', 'api.myapp.com']
+    })
+  ]
+});
+```
+
+### Instrumentation Integration
+
+```typescript
+import { defineIntegration } from '@sentry/core';
+import { startInactiveSpan } from '@sentry/core';
+import type { Client, Integration, IntegrationFn } from '@sentry/types';
+
+const _databaseIntegration = (() => {
+  return {
+    name: 'DatabaseIntegration',
+    
+    setup(client: Client) {
+      // Monkey-patch database library
+      const originalQuery = Database.prototype.query;
+      
+      Database.prototype.query = function(sql: string, ...args: any[]) {
+        // Create span for database query
+        return startInactiveSpan({
+          name: sql,
+          op: 'db.query',
+          attributes: {
+            'db.system': 'postgresql',
+            'db.statement': sql
+          }
+        }, (span) => {
+          try {
+            const result = originalQuery.call(this, sql, ...args);
+            span?.setStatus({ code: 1 }); // OK
+            return result;
+          } catch (error) {
+            span?.setStatus({ code: 2 }); // ERROR
+            throw error;
+          }
+        });
+      };
+    }
+  } satisfies Integration;
+}) satisfies IntegrationFn;
+
+export const databaseIntegration = defineIntegration(_databaseIntegration);
+```
+
+## Integration Setup Flow
+
+From `packages/core/src/integration.ts`:
+
+```typescript
+export function setupIntegrations(
+  client: Client,
+  integrations: Integration[]
+): IntegrationIndex {
+  const integrationIndex: IntegrationIndex = {};
+
+  for (const integration of integrations) {
+    // setupOnce is called once per integration
+    if (integration.setupOnce) {
+      integration.setupOnce();
+    }
+    
+    integrationIndex[integration.name] = integration;
+
+    // setup is called for each client
+    if (integration.setup) {
+      integration.setup(client);
+    }
+  }
+
+  return integrationIndex;
+}
+
+export function afterSetupIntegrations(
+  client: Client,
+  integrations: Integration[]
+): void {
+  for (const integration of integrations) {
+    if (integration.afterAllSetup) {
+      integration.afterAllSetup(client);
+    }
+  }
+}
+```
+
+## Getting Integrations
+
+```typescript
+import { getClient } from '@sentry/node';
+
+const client = getClient();
+if (client) {
+  // Get integration by name
+  const httpIntegration = client.getIntegrationByName('Http');
+  
+  if (httpIntegration) {
+    console.log('HTTP integration is active');
+  }
+}
+```
+
+## Integration Best Practices
+
+### 1. Use setupOnce for Global Setup
+
+```typescript
+setupOnce() {
+  // One-time global setup
+  registerGlobalErrorHandler();
+}
+```
+
+### 2. Use setup for Client-Specific Setup
+
+```typescript
+setup(client: Client) {
+  // Client-specific setup
+  client.on('beforeSendEvent', this.handleEvent);
+}
+```
+
+### 3. Clean Up Resources
+
+```typescript
+let unsubscribe: (() => void) | undefined;
+
+setup(client: Client) {
+  unsubscribe = client.on('spanStart', handleSpan);
+}
+
+shutdown?() {
+  // Clean up when integration is removed
+  unsubscribe?.();
+}
+```
+
+### 4. Handle Errors Gracefully
+
+```typescript
+processEvent(event: Event): Event | null {
+  try {
+    return this.transformEvent(event);
+  } catch (error) {
+    console.error('Integration error:', error);
+    return event; // Return original event on error
+  }
+}
+```
+
+## Related
+
+- [Client](/api/core/client)
+- [Event Types](/api/types/event)
+- [Configuration](/api/configuration/options)

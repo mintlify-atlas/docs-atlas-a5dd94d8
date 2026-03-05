@@ -1,0 +1,427 @@
+---
+title: Sampling Configuration
+description: Control data volume and costs with intelligent sampling strategies
+---
+
+Sampling allows you to control how much data is sent to Sentry, helping manage costs while maintaining visibility into your application's health.
+
+## Error Sampling
+
+By default, the SDK captures 100% of errors. You can control this with `sampleRate`:
+
+```javascript
+import * as Sentry from '@sentry/browser';
+
+Sentry.init({
+  dsn: '__DSN__',
+  sampleRate: 0.5, // Capture 50% of errors
+});
+```
+
+<Warning>
+Lowering `sampleRate` means you'll miss some errors. Use this carefully and prefer filtering instead for most use cases.
+</Warning>
+
+## Performance Sampling
+
+### Traces Sample Rate
+
+Control the percentage of transactions sent to Sentry:
+
+```javascript
+Sentry.init({
+  dsn: '__DSN__',
+  tracesSampleRate: 0.1, // Capture 10% of transactions
+});
+```
+
+**Common sample rates:**
+- Development: `1.0` (100%)
+- Staging: `0.5` (50%)
+- Production (low traffic): `0.25` (25%)
+- Production (high traffic): `0.05` - `0.1` (5-10%)
+
+### Dynamic Sampling with `tracesSampler`
+
+Implement custom sampling logic based on transaction context:
+
+```javascript
+Sentry.init({
+  dsn: '__DSN__',
+  tracesSampler: (samplingContext) => {
+    // Don't sample health checks
+    if (samplingContext.name === '/health') {
+      return 0;
+    }
+    
+    // Sample API routes at 50%
+    if (samplingContext.name?.startsWith('/api/')) {
+      return 0.5;
+    }
+    
+    // Sample everything else at 10%
+    return 0.1;
+  },
+});
+```
+
+### Sampling Context
+
+The `samplingContext` object contains information about the transaction:
+
+```javascript
+Sentry.init({
+  dsn: '__DSN__',
+  tracesSampler: (samplingContext) => {
+    const {
+      name,              // Transaction name
+      attributes,        // Span attributes at creation time
+      parentSampled,     // Whether parent span was sampled (distributed tracing)
+    } = samplingContext;
+    
+    // Access custom attributes
+    if (attributes?.['http.method'] === 'OPTIONS') {
+      return 0; // Don't sample OPTIONS requests
+    }
+    
+    // Inherit parent sampling decision for distributed tracing
+    if (parentSampled !== undefined) {
+      return parentSampled ? 1 : 0;
+    }
+    
+    return 0.1;
+  },
+});
+```
+
+## Session Replay Sampling
+
+### Session-Based Sampling
+
+Capture a percentage of all sessions:
+
+```javascript
+Sentry.init({
+  dsn: '__DSN__',
+  integrations: [
+    Sentry.replayIntegration({
+      // Capture 10% of all sessions
+      replaysSessionSampleRate: 0.1,
+    }),
+  ],
+});
+```
+
+### Error-Based Sampling
+
+Capture replays when errors occur:
+
+```javascript
+Sentry.init({
+  dsn: '__DSN__',
+  integrations: [
+    Sentry.replayIntegration({
+      // Capture 1% of normal sessions
+      replaysSessionSampleRate: 0.01,
+      // Capture 100% of sessions with errors
+      replaysOnErrorSampleRate: 1.0,
+    }),
+  ],
+});
+```
+
+<Tip>
+Use high `replaysOnErrorSampleRate` (like 1.0) to ensure you always have replay context for errors, while keeping `replaysSessionSampleRate` low to control costs.
+</Tip>
+
+## Profiling Sampling
+
+Control profiling data capture:
+
+```javascript
+import * as Sentry from '@sentry/browser';
+import { browserProfilingIntegration } from '@sentry/browser';
+
+Sentry.init({
+  dsn: '__DSN__',
+  integrations: [
+    browserProfilingIntegration(),
+  ],
+  tracesSampleRate: 1.0,
+  // Profile 10% of sampled transactions
+  profilesSampleRate: 0.1,
+});
+```
+
+### Dynamic Profile Sampling
+
+```javascript
+Sentry.init({
+  dsn: '__DSN__',
+  integrations: [
+    browserProfilingIntegration(),
+  ],
+  tracesSampleRate: 0.1,
+  profilesSampler: (samplingContext) => {
+    // Only profile slow transactions
+    if (samplingContext.attributes?.['http.route'] === '/slow-endpoint') {
+      return 1.0;
+    }
+    return 0.1;
+  },
+});
+```
+
+<Warning>
+`profilesSampleRate` is relative to `tracesSampleRate`. If a transaction is not sampled, it won't be profiled.
+</Warning>
+
+## Environment-Based Sampling
+
+Adjust sampling based on your environment:
+
+```javascript
+const environment = process.env.NODE_ENV;
+
+let tracesSampleRate;
+if (environment === 'production') {
+  tracesSampleRate = 0.05; // 5% in production
+} else if (environment === 'staging') {
+  tracesSampleRate = 0.25; // 25% in staging
+} else {
+  tracesSampleRate = 1.0; // 100% in development
+}
+
+Sentry.init({
+  dsn: '__DSN__',
+  environment,
+  tracesSampleRate,
+});
+```
+
+## Advanced Sampling Strategies
+
+### User-Based Sampling
+
+Sample based on user attributes:
+
+```javascript
+Sentry.init({
+  dsn: '__DSN__',
+  tracesSampler: (samplingContext) => {
+    const user = Sentry.getCurrentScope().getUser();
+    
+    // Always sample for internal users
+    if (user?.email?.endsWith('@mycompany.com')) {
+      return 1.0;
+    }
+    
+    // Sample 10% for regular users
+    return 0.1;
+  },
+});
+```
+
+### Route-Based Sampling
+
+```javascript
+Sentry.init({
+  dsn: '__DSN__',
+  tracesSampler: (samplingContext) => {
+    const route = samplingContext.name;
+    
+    // High-value routes: sample more
+    if (route?.includes('/checkout') || route?.includes('/payment')) {
+      return 0.5;
+    }
+    
+    // Static assets: don't sample
+    if (route?.match(/\.(js|css|png|jpg)$/)) {
+      return 0;
+    }
+    
+    // Everything else
+    return 0.1;
+  },
+});
+```
+
+### Time-Based Sampling
+
+Adjust sampling during peak hours:
+
+```javascript
+Sentry.init({
+  dsn: '__DSN__',
+  tracesSampler: () => {
+    const hour = new Date().getHours();
+    
+    // Peak hours (9 AM - 5 PM): sample less
+    if (hour >= 9 && hour <= 17) {
+      return 0.05;
+    }
+    
+    // Off-peak: sample more
+    return 0.2;
+  },
+});
+```
+
+### Random Sampling with Consistency
+
+Ensure consistent sampling for the same user/session:
+
+```javascript
+import { safeMathRandom } from '@sentry/core';
+
+Sentry.init({
+  dsn: '__DSN__',
+  tracesSampler: (samplingContext) => {
+    // Get consistent random value for this session
+    const sessionId = Sentry.getCurrentScope().getPropagationContext().traceId;
+    const hash = sessionId.split('').reduce((acc, char) => {
+      return ((acc << 5) - acc) + char.charCodeAt(0) | 0;
+    }, 0);
+    
+    // Convert to 0-1 range
+    const random = Math.abs(hash % 100) / 100;
+    
+    // Sample 10% consistently
+    return random < 0.1 ? 1.0 : 0;
+  },
+});
+```
+
+## Node.js Sampling
+
+For Node.js applications, sampling works the same way:
+
+```javascript
+import * as Sentry from '@sentry/node';
+
+Sentry.init({
+  dsn: '__DSN__',
+  tracesSampleRate: 0.1,
+  tracesSampler: (samplingContext) => {
+    // Don't sample health checks
+    if (samplingContext.name === 'GET /health') {
+      return 0;
+    }
+    
+    // Sample GraphQL operations differently
+    if (samplingContext.attributes?.['graphql.operation.name']) {
+      return 0.5;
+    }
+    
+    return 0.1;
+  },
+});
+```
+
+## Verifying Sampling
+
+Check if a transaction was sampled:
+
+```javascript
+import { startSpan } from '@sentry/browser';
+
+startSpan({ name: 'test-transaction' }, (span) => {
+  if (span) {
+    console.log('Transaction was sampled');
+  } else {
+    console.log('Transaction was not sampled');
+  }
+});
+```
+
+## Best Practices
+
+<Accordion title="Start with high rates, then reduce">
+  Begin with `tracesSampleRate: 1.0` in development and staging to understand your application's behavior. Gradually reduce rates in production based on volume.
+</Accordion>
+
+<Accordion title="Never sample security-critical events">
+  Always capture authentication failures, payment errors, and other critical events:
+  
+  ```javascript
+  tracesSampler: (samplingContext) => {
+    if (samplingContext.name?.includes('/auth') || 
+        samplingContext.name?.includes('/payment')) {
+      return 1.0; // Always sample
+    }
+    return 0.1;
+  }
+  ```
+</Accordion>
+
+<Accordion title="Use dynamic sampling for flexibility">
+  Prefer `tracesSampler` over `tracesSampleRate` for production applications to handle different routes and scenarios differently.
+</Accordion>
+
+<Accordion title="Monitor your quota usage">
+  Check Sentry's quota usage regularly and adjust sampling rates if you're approaching limits.
+</Accordion>
+
+<Accordion title="Consider distributed tracing">
+  When using distributed tracing, respect parent sampling decisions:
+  
+  ```javascript
+  tracesSampler: (samplingContext) => {
+    if (samplingContext.parentSampled !== undefined) {
+      return samplingContext.parentSampled ? 1.0 : 0;
+    }
+    return 0.1;
+  }
+  ```
+</Accordion>
+
+## Common Patterns
+
+### Production-Ready Configuration
+
+```javascript
+Sentry.init({
+  dsn: '__DSN__',
+  environment: process.env.NODE_ENV,
+  
+  // Error sampling: capture all errors
+  sampleRate: 1.0,
+  
+  // Performance sampling: smart sampling
+  tracesSampler: (samplingContext) => {
+    // Health checks: never sample
+    if (samplingContext.name === '/health') return 0;
+    
+    // Critical paths: always sample
+    if (samplingContext.name?.match(/\/(checkout|payment|auth)/)) return 1.0;
+    
+    // API routes: moderate sampling
+    if (samplingContext.name?.startsWith('/api/')) return 0.2;
+    
+    // Static assets: never sample
+    if (samplingContext.name?.match(/\.(js|css|png|jpg|svg)$/)) return 0;
+    
+    // Everything else: low sampling
+    return 0.05;
+  },
+  
+  // Replay sampling
+  integrations: [
+    Sentry.replayIntegration({
+      replaysSessionSampleRate: 0.01, // 1% of sessions
+      replaysOnErrorSampleRate: 1.0,  // 100% of errors
+    }),
+  ],
+});
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Filtering Events" href="/guides/configuration/filtering">
+    Filter events before sending to Sentry
+  </Card>
+  <Card title="Performance Best Practices" href="/guides/best-practices/performance">
+    Optimize performance monitoring
+  </Card>
+</CardGroup>

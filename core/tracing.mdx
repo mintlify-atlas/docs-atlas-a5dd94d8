@@ -1,0 +1,493 @@
+---
+title: "Tracing"
+description: "Track request flows and operations across your application"
+---
+
+Tracing allows you to follow a request or operation through your entire application, creating a hierarchical view of nested operations and their timing.
+
+## Understanding Traces
+
+A trace represents a single request or operation flow through your application. It consists of:
+
+- **Trace ID**: Unique identifier for the entire trace
+- **Root Span**: The top-level operation (transaction)
+- **Child Spans**: Nested operations within the trace
+
+```javascript
+import * as Sentry from '@sentry/browser';
+
+// Start a new trace
+Sentry.startSpan({ name: 'process_order', op: 'function' }, (span) => {
+  // This is the root span of a new trace
+  console.log('Trace ID:', span.spanContext().traceId);
+  
+  // Child spans inherit the trace ID
+  Sentry.startSpan({ name: 'validate_order', op: 'function' }, () => {
+    validateOrder();
+  });
+  
+  Sentry.startSpan({ name: 'save_order', op: 'db.query' }, () => {
+    saveOrder();
+  });
+});
+```
+
+## Starting Spans
+
+### Automatic Span Finishing
+
+The recommended way to create spans - they finish automatically:
+
+```javascript
+Sentry.startSpan({ name: 'my_operation', op: 'function' }, (span) => {
+  // Your code here
+  doWork();
+  
+  // Span automatically finishes when callback completes
+  return result;
+});
+```
+
+### Manual Span Control
+
+For cases where you need explicit control:
+
+```javascript
+Sentry.startSpanManual({ name: 'long_operation', op: 'task' }, (span, finish) => {
+  // Start async work
+  startAsyncWork();
+  
+  // Finish the span manually later
+  setTimeout(() => {
+    finish(); // or span.end()
+  }, 5000);
+});
+```
+
+### Inactive Spans
+
+Create spans that don't automatically become the active span:
+
+```javascript
+import { startInactiveSpan } from '@sentry/browser';
+
+const span = startInactiveSpan({ name: 'background_task', op: 'task' });
+
+// Do work
+processBackground();
+
+// Manually finish
+span.end();
+```
+
+<Note>
+Inactive spans don't become parent spans for automatic instrumentation. Use them for background tasks or parallel operations.
+</Note>
+
+## Working with Active Spans
+
+### Setting Active Spans
+
+Control which span is active in a given scope:
+
+```javascript
+import { withActiveSpan, startInactiveSpan } from '@sentry/browser';
+
+const span = startInactiveSpan({ name: 'custom_operation' });
+
+withActiveSpan(span, () => {
+  // Inside here, `span` is the active span
+  // Child spans will be children of `span`
+  Sentry.startSpan({ name: 'child_operation' }, () => {
+    // This is a child of `span`
+  });
+});
+
+span.end();
+```
+
+### No Parent Span
+
+Start a span tree without a parent:
+
+```javascript
+import { withActiveSpan } from '@sentry/browser';
+
+withActiveSpan(null, () => {
+  // Spans started here won't have a parent
+  Sentry.startSpan({ name: 'independent_operation' }, () => {
+    // This is a root span
+  });
+});
+```
+
+## Trace Context
+
+Access trace information from scopes:
+
+```javascript
+import { getCurrentScope, getTraceContextFromScope } from '@sentry/browser';
+
+const scope = getCurrentScope();
+const traceContext = getTraceContextFromScope(scope);
+
+console.log('Trace ID:', traceContext.trace_id);
+console.log('Span ID:', traceContext.span_id);
+console.log('Parent Span ID:', traceContext.parent_span_id);
+```
+
+## Continuing Traces
+
+Continue a trace from incoming headers (useful for distributed tracing):
+
+```javascript
+import { continueTrace } from '@sentry/browser';
+
+// Extract trace headers from incoming request
+const sentryTrace = request.headers.get('sentry-trace');
+const baggage = request.headers.get('baggage');
+
+continueTrace(
+  {
+    sentryTrace,
+    baggage
+  },
+  () => {
+    // Operations here are part of the incoming trace
+    Sentry.startSpan({ name: 'handle_request', op: 'http.server' }, () => {
+      handleRequest();
+    });
+  }
+);
+```
+
+<Tip>
+Use `continueTrace` to maintain trace context across service boundaries and create a complete distributed trace.
+</Tip>
+
+## Starting New Traces
+
+Explicitly start a new trace, disconnecting from any parent trace:
+
+```javascript
+import { startNewTrace } from '@sentry/browser';
+
+startNewTrace(() => {
+  // This starts a completely new trace
+  // Useful for background jobs or independent operations
+  Sentry.startSpan({ name: 'background_job', op: 'task' }, () => {
+    processBackgroundJob();
+  });
+});
+```
+
+<Warning>
+Only use `startNewTrace` when you explicitly want to break the trace chain. In most cases, operations should be part of the ongoing trace.
+</Warning>
+
+## Span Options
+
+### Basic Options
+
+```javascript
+Sentry.startSpan(
+  {
+    name: 'my_operation',
+    op: 'function',
+    attributes: {
+      'custom.field': 'value',
+      'user.type': 'premium'
+    }
+  },
+  (span) => {
+    // Your code
+  }
+);
+```
+
+### Parent Span Control
+
+Explicitly set the parent span:
+
+```javascript
+import { startInactiveSpan } from '@sentry/browser';
+
+const parentSpan = startInactiveSpan({ name: 'parent' });
+
+Sentry.startSpan(
+  {
+    name: 'child',
+    parentSpan: parentSpan
+  },
+  () => {
+    // This span is a child of parentSpan
+  }
+);
+
+parentSpan.end();
+```
+
+### Conditional Spans
+
+Only create spans if a parent exists:
+
+```javascript
+Sentry.startSpan(
+  {
+    name: 'optional_child',
+    onlyIfParent: true
+  },
+  (span) => {
+    // This span is only created if there's an active parent span
+    // Otherwise, it's a non-recording span
+  }
+);
+```
+
+### Force Transaction
+
+Force a span to be a transaction (root span):
+
+```javascript
+Sentry.startSpan(
+  {
+    name: 'forced_transaction',
+    forceTransaction: true
+  },
+  (span) => {
+    // This creates a new transaction even if there's an active parent
+  }
+);
+```
+
+### Custom Scope
+
+Provide a specific scope for the span:
+
+```javascript
+import { Scope } from '@sentry/browser';
+
+const customScope = new Scope();
+customScope.setTag('custom', 'scope');
+
+Sentry.startSpan(
+  {
+    name: 'scoped_operation',
+    scope: customScope
+  },
+  () => {
+    // This span uses customScope
+  }
+);
+```
+
+## Span Attributes
+
+Add structured data to spans:
+
+```javascript
+Sentry.startSpan({ name: 'process_payment' }, (span) => {
+  span.setAttribute('payment.method', 'credit_card');
+  span.setAttribute('payment.amount', 99.99);
+  span.setAttribute('payment.currency', 'USD');
+  span.setAttribute('user.premium', true);
+  
+  processPayment();
+});
+```
+
+### Semantic Attributes
+
+Use semantic attributes for standard data:
+
+```javascript
+Sentry.startSpan(
+  {
+    name: 'GET /api/users',
+    op: 'http.client',
+    attributes: {
+      'http.method': 'GET',
+      'http.url': 'https://api.example.com/users',
+      'http.status_code': 200,
+      'http.request.body.size': 0,
+      'http.response.body.size': 1024
+    }
+  },
+  () => {
+    // ...
+  }
+);
+```
+
+## Updating Span Names
+
+Change a span's name dynamically:
+
+```javascript
+Sentry.startSpan({ name: 'dynamic_operation' }, (span) => {
+  const result = performOperation();
+  
+  // Update the span name based on the result
+  span.updateName(`operation_${result.type}`);
+  
+  return result;
+});
+```
+
+## Span Status
+
+Set the status to indicate success or failure:
+
+```javascript
+import { SPAN_STATUS_ERROR, SPAN_STATUS_OK } from '@sentry/browser';
+
+Sentry.startSpan({ name: 'risky_operation' }, (span) => {
+  try {
+    performRiskyOperation();
+    span.setStatus({ code: SPAN_STATUS_OK, message: 'ok' });
+  } catch (error) {
+    span.setStatus({ code: SPAN_STATUS_ERROR, message: 'internal_error' });
+    throw error;
+  }
+});
+```
+
+<Note>
+Span status is automatically set to `error` if an exception occurs within the span callback.
+</Note>
+
+## Span Events
+
+Add timestamped events to spans:
+
+```javascript
+Sentry.startSpan({ name: 'multi_step_process' }, (span) => {
+  span.addEvent('validation_started');
+  validateInput();
+  
+  span.addEvent('processing_started', {
+    'items.count': 10
+  });
+  processItems();
+  
+  span.addEvent('processing_complete', {
+    'items.processed': 10,
+    'items.failed': 0
+  });
+});
+```
+
+## Practical Examples
+
+### API Request Handler
+
+```javascript
+async function handleApiRequest(req, res) {
+  await Sentry.startSpan(
+    {
+      name: `${req.method} ${req.path}`,
+      op: 'http.server',
+      attributes: {
+        'http.method': req.method,
+        'http.route': req.path,
+        'http.query': req.query
+      }
+    },
+    async (span) => {
+      // Authenticate
+      const user = await Sentry.startSpan(
+        { name: 'authenticate', op: 'auth' },
+        () => authenticateUser(req)
+      );
+      
+      span.setAttribute('user.id', user.id);
+      
+      // Query database
+      const data = await Sentry.startSpan(
+        { name: 'query_database', op: 'db.query' },
+        () => fetchData(user.id)
+      );
+      
+      span.setAttribute('result.count', data.length);
+      
+      // Serialize response
+      const response = await Sentry.startSpan(
+        { name: 'serialize_response', op: 'serialize' },
+        () => JSON.stringify(data)
+      );
+      
+      res.json(response);
+    }
+  );
+}
+```
+
+### Background Job Processing
+
+```javascript
+import { startNewTrace } from '@sentry/browser';
+
+async function processBackgroundJob(job) {
+  // Start a new trace for this independent job
+  await startNewTrace(async () => {
+    await Sentry.startSpan(
+      {
+        name: `job.${job.type}`,
+        op: 'queue.task',
+        attributes: {
+          'job.id': job.id,
+          'job.type': job.type,
+          'job.priority': job.priority
+        }
+      },
+      async (span) => {
+        // Fetch job data
+        const data = await Sentry.startSpan(
+          { name: 'fetch_job_data', op: 'db.query' },
+          () => fetchJobData(job.id)
+        );
+        
+        // Process
+        const result = await Sentry.startSpan(
+          { name: 'process_job', op: 'function' },
+          () => processJob(data)
+        );
+        
+        span.setAttribute('result.status', result.status);
+        
+        // Save result
+        await Sentry.startSpan(
+          { name: 'save_result', op: 'db.query' },
+          () => saveResult(job.id, result)
+        );
+      }
+    );
+  });
+}
+```
+
+## Best Practices
+
+1. **Use descriptive names**: Span names should clearly indicate what operation they represent
+2. **Set appropriate operations**: Use standard operation types for consistency
+3. **Add relevant attributes**: Include data that helps identify and debug slow operations
+4. **Keep span hierarchies shallow**: Deeply nested spans can be hard to analyze
+5. **Use semantic attributes**: Follow OpenTelemetry conventions for standard data
+6. **Finish spans promptly**: Don't leave spans open longer than necessary
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Spans" icon="clock" href="/core/spans">
+    Learn more about individual spans
+  </Card>
+  <Card title="Distributed Tracing" icon="network-wired" href="/core/distributed-tracing">
+    Track requests across services
+  </Card>
+  <Card title="Performance" icon="gauge" href="/core/performance">
+    Overview of performance monitoring
+  </Card>
+  <Card title="Profiling" icon="chart-line" href="/core/profiling">
+    CPU profiling for performance bottlenecks
+  </Card>
+</CardGroup>

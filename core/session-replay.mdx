@@ -1,0 +1,524 @@
+---
+title: "Session Replay"
+description: "Record and replay user sessions to debug issues visually"
+---
+
+Session Replay lets you watch a video-like reproduction of user sessions, helping you understand exactly what users experienced when issues occurred.
+
+## Setup
+
+Enable Session Replay during SDK initialization:
+
+```javascript
+import * as Sentry from '@sentry/browser';
+
+Sentry.init({
+  dsn: 'your-dsn',
+  
+  // Session Replay
+  integrations: [
+    Sentry.replayIntegration({
+      // Capture 10% of all sessions
+      sessionSampleRate: 0.1,
+      // Capture 100% of sessions with errors
+      errorSampleRate: 1.0,
+    }),
+  ],
+  
+  // Also enable performance monitoring for best results
+  tracesSampleRate: 1.0,
+});
+```
+
+<Note>
+Session Replay requires the `@sentry/replay` package or using a bundle that includes it (like `@sentry/browser`).
+</Note>
+
+## Sampling
+
+### Session Sample Rate
+
+Percentage of all sessions to record:
+
+```javascript
+Sentry.replayIntegration({
+  sessionSampleRate: 0.1 // Record 10% of all sessions
+})
+```
+
+### Error Sample Rate
+
+Percentage of sessions with errors to record:
+
+```javascript
+Sentry.replayIntegration({
+  errorSampleRate: 1.0 // Record 100% of sessions with errors
+})
+```
+
+### Combined Strategy
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  integrations: [
+    Sentry.replayIntegration({
+      // Always record sessions with errors
+      errorSampleRate: 1.0,
+      // Sample 5% of normal sessions
+      sessionSampleRate: 0.05,
+    }),
+  ],
+});
+```
+
+<Tip>
+Start with high `errorSampleRate` (1.0) and low `sessionSampleRate` (0.01-0.1) to capture issues while managing costs.
+</Tip>
+
+## Recording Modes
+
+### Session Mode
+
+Continuously records the entire session:
+
+```javascript
+Sentry.replayIntegration({
+  sessionSampleRate: 0.1,
+  // Session mode: records from the start
+})
+```
+
+### Buffer Mode (Error-Only)
+
+Only keeps the last 60 seconds in memory, saves to Sentry when an error occurs:
+
+```javascript
+Sentry.replayIntegration({
+  // Only record when errors occur
+  sessionSampleRate: 0,
+  errorSampleRate: 1.0,
+})
+```
+
+<Note>
+Buffer mode is more efficient as it only uploads replay data when an error actually happens.
+</Note>
+
+## Configuration Options
+
+### Basic Options
+
+```javascript
+Sentry.replayIntegration({
+  // Sampling
+  sessionSampleRate: 0.1,
+  errorSampleRate: 1.0,
+  
+  // Mask all text content
+  maskAllText: true,
+  
+  // Block all media elements (img, video, audio)
+  blockAllMedia: true,
+  
+  // Network details
+  networkDetailAllowUrls: ['https://api.example.com'],
+  networkCaptureBodies: true,
+  networkRequestHeaders: ['Authorization'],
+  networkResponseHeaders: ['X-Request-ID'],
+})
+```
+
+### Privacy Options
+
+```javascript
+Sentry.replayIntegration({
+  // Mask all text by default
+  maskAllText: true,
+  
+  // Mask specific selectors
+  mask: ['.sensitive-data', '#credit-card'],
+  
+  // Block elements from recording
+  block: ['.advertisement', '.third-party-widget'],
+  
+  // Unmask specific elements
+  unmask: ['.public-info'],
+  
+  // Block all media
+  blockAllMedia: true,
+})
+```
+
+## Privacy Controls
+
+### Masking Text
+
+Mask sensitive text automatically:
+
+```html
+<!-- All text inside will be masked -->
+<div class="sentry-mask">
+  <p>Sensitive information</p>
+  <span>Credit card: 1234-5678-9012-3456</span>
+</div>
+```
+
+Or configure via JavaScript:
+
+```javascript
+Sentry.replayIntegration({
+  mask: ['.payment-info', '.personal-data']
+})
+```
+
+### Blocking Elements
+
+Completely block elements from being recorded:
+
+```html
+<!-- Element will show as placeholder -->
+<div class="sentry-block">
+  <img src="sensitive-photo.jpg" />
+</div>
+```
+
+Or configure via JavaScript:
+
+```javascript
+Sentry.replayIntegration({
+  block: ['.profile-photo', '.private-content']
+})
+```
+
+### Unmasking Elements
+
+Unmask specific elements when `maskAllText` is enabled:
+
+```html
+<!-- This text will NOT be masked -->
+<div class="sentry-unmask">
+  <p>This public text is visible in replays</p>
+</div>
+```
+
+<Warning>
+Carefully review what data is captured. Always err on the side of privacy when handling sensitive user information.
+</Warning>
+
+## Network Recording
+
+### Capture Network Requests
+
+```javascript
+Sentry.replayIntegration({
+  networkDetailAllowUrls: [
+    // Capture details for these URLs
+    'https://api.example.com',
+    /^https:\/\/.*\.example\.com/,
+  ],
+  
+  // Capture request/response bodies
+  networkCaptureBodies: true,
+  
+  // Capture request headers
+  networkRequestHeaders: ['Content-Type', 'Authorization'],
+  
+  // Capture response headers
+  networkResponseHeaders: ['Content-Type', 'X-Request-ID'],
+})
+```
+
+### Network Privacy
+
+```javascript
+Sentry.replayIntegration({
+  networkDetailAllowUrls: ['https://api.example.com'],
+  
+  // Don't capture bodies (more private)
+  networkCaptureBodies: false,
+  
+  // Only capture safe headers
+  networkRequestHeaders: ['Content-Type'],
+  networkResponseHeaders: ['Content-Type'],
+})
+```
+
+## Console Logs
+
+Include console logs in replays:
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  integrations: [
+    Sentry.replayIntegration(),
+    // Capture console logs
+    Sentry.captureConsoleIntegration({
+      levels: ['log', 'info', 'warn', 'error', 'debug']
+    }),
+  ],
+});
+```
+
+## Canvas Recording
+
+Record canvas elements (experimental):
+
+```javascript
+import * as Sentry from '@sentry/browser';
+import { replayCanvasIntegration } from '@sentry/replay-canvas';
+
+Sentry.init({
+  dsn: 'your-dsn',
+  integrations: [
+    Sentry.replayIntegration(),
+    // Add canvas recording
+    replayCanvasIntegration(),
+  ],
+});
+```
+
+<Note>
+Canvas recording is experimental and may impact performance. Use only when necessary.
+</Note>
+
+## Manual Control
+
+### Start/Stop Recording
+
+```javascript
+import { getClient } from '@sentry/browser';
+
+const client = getClient();
+const replay = client?.getIntegrationByName('Replay');
+
+if (replay) {
+  // Start recording
+  replay.start();
+  
+  // Stop recording
+  replay.stop();
+  
+  // Flush current replay
+  await replay.flush();
+}
+```
+
+### Conditional Recording
+
+```javascript
+// Only record for authenticated users
+if (user.isAuthenticated) {
+  const replay = client?.getIntegrationByName('Replay');
+  replay?.start();
+}
+```
+
+## Integration with Errors
+
+Replays are automatically linked to errors:
+
+```javascript
+try {
+  riskyOperation();
+} catch (error) {
+  // Error is automatically linked to the replay
+  Sentry.captureException(error);
+}
+```
+
+## Integration with Performance
+
+Combine replays with performance monitoring:
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  
+  // Enable both
+  integrations: [
+    Sentry.replayIntegration({
+      sessionSampleRate: 0.1,
+      errorSampleRate: 1.0,
+    }),
+  ],
+  
+  tracesSampleRate: 1.0,
+});
+```
+
+Replays show performance spans as part of the timeline.
+
+## Performance Impact
+
+### Optimization Tips
+
+1. **Use buffer mode**: Only record when errors occur
+2. **Lower sample rates**: Record fewer sessions
+3. **Block media**: Reduce data capture size
+4. **Mask text**: Use CSS masking instead of JS
+5. **Limit network detail**: Only capture essential APIs
+
+```javascript
+// Optimized configuration
+Sentry.replayIntegration({
+  // Only record errors
+  sessionSampleRate: 0,
+  errorSampleRate: 1.0,
+  
+  // Reduce data size
+  maskAllText: true,
+  blockAllMedia: true,
+  
+  // Minimal network capture
+  networkDetailAllowUrls: [],
+  networkCaptureBodies: false,
+})
+```
+
+## Example Configurations
+
+### Development
+
+```javascript
+Sentry.replayIntegration({
+  // Record everything in development
+  sessionSampleRate: 1.0,
+  errorSampleRate: 1.0,
+  
+  // Less privacy restrictions
+  maskAllText: false,
+  blockAllMedia: false,
+  
+  // Capture full network details
+  networkDetailAllowUrls: ['*'],
+  networkCaptureBodies: true,
+})
+```
+
+### Production
+
+```javascript
+Sentry.replayIntegration({
+  // Conservative sampling
+  sessionSampleRate: 0.01, // 1% of sessions
+  errorSampleRate: 1.0,     // 100% of errors
+  
+  // Strong privacy
+  maskAllText: true,
+  blockAllMedia: true,
+  
+  // Limited network capture
+  networkDetailAllowUrls: ['https://api.example.com'],
+  networkCaptureBodies: false,
+})
+```
+
+### E-commerce
+
+```javascript
+Sentry.replayIntegration({
+  sessionSampleRate: 0.05,
+  errorSampleRate: 1.0,
+  
+  // Mask sensitive areas
+  mask: [
+    '.payment-form',
+    '.credit-card-input',
+    '.cvv-input',
+    '[data-sensitive]'
+  ],
+  
+  // Block sensitive elements
+  block: [
+    '.user-photo',
+    '.signature'
+  ],
+  
+  // Capture checkout API only
+  networkDetailAllowUrls: ['https://api.example.com/checkout'],
+  networkCaptureBodies: false,
+})
+```
+
+## Viewing Replays
+
+Replays appear in the Sentry UI:
+
+1. **Issues**: Linked to error events
+2. **Replays Tab**: Browse all recorded sessions
+3. **Performance**: Associated with transactions
+
+Each replay includes:
+- Visual recording of the session
+- Console logs
+- Network activity
+- Performance data
+- Breadcrumbs
+- Custom events
+
+## Best Practices
+
+1. **Start conservative**: Low sample rates, high privacy
+2. **Monitor costs**: Replays can increase data volume significantly
+3. **Respect privacy**: Mask sensitive data by default
+4. **Test thoroughly**: Verify masking works as expected
+5. **Use buffer mode**: More efficient for error debugging
+6. **Combine with performance**: Get complete context
+7. **Review regularly**: Ensure no PII is captured
+
+<Warning>
+**Privacy Checklist:**
+- Mask all text inputs
+- Block sensitive media
+- Don't capture auth tokens
+- Exclude third-party content
+- Review captured network data
+- Comply with GDPR/privacy laws
+</Warning>
+
+## Troubleshooting
+
+### Replays Not Recording
+
+```javascript
+// Check if replay is enabled
+const client = Sentry.getClient();
+const replay = client?.getIntegrationByName('Replay');
+
+if (!replay) {
+  console.error('Replay integration not found');
+}
+
+// Check sampling
+console.log('Session sample rate:', replay.options.sessionSampleRate);
+console.log('Error sample rate:', replay.options.errorSampleRate);
+```
+
+### High Memory Usage
+
+```javascript
+// Use buffer mode instead of session mode
+Sentry.replayIntegration({
+  sessionSampleRate: 0,
+  errorSampleRate: 1.0,
+})
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Error Monitoring" icon="bug" href="/core/error-monitoring">
+    Link replays with error events
+  </Card>
+  <Card title="Performance" icon="gauge" href="/core/performance">
+    Combine replays with performance data
+  </Card>
+  <Card title="Breadcrumbs" icon="shoe-prints" href="/core/breadcrumbs">
+    Track user actions in replays
+  </Card>
+  <Card title="User Feedback" icon="comment" href="/core/user-feedback">
+    Collect feedback during sessions
+  </Card>
+</CardGroup>

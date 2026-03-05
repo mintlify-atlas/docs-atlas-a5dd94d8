@@ -1,0 +1,521 @@
+---
+title: "Event Types"
+description: "TypeScript interfaces for Sentry events"
+---
+
+Event types define the structure of events sent to Sentry.
+
+## Event Interface
+
+From `packages/core/src/types-hoist/event.ts`:
+
+```typescript
+export interface Event {
+  event_id?: string;
+  message?: string;
+  logentry?: {
+    message?: string;
+    params?: unknown[];
+  };
+  timestamp?: number;
+  start_timestamp?: number;
+  level?: SeverityLevel;
+  platform?: string;
+  logger?: string;
+  server_name?: string;
+  release?: string;
+  dist?: string;
+  environment?: string;
+  sdk?: SdkInfo;
+  request?: RequestEventData;
+  transaction?: string;
+  modules?: { [key: string]: string };
+  fingerprint?: string[];
+  exception?: {
+    values?: Exception[];
+  };
+  breadcrumbs?: Breadcrumb[];
+  contexts?: Contexts;
+  tags?: { [key: string]: Primitive };
+  extra?: Extras;
+  user?: User;
+  type?: EventType;
+  spans?: SpanJSON[];
+  measurements?: Measurements;
+}
+```
+
+## Fields
+
+### event_id
+
+<ResponseField name="event_id" type="string">
+  Unique identifier for the event (UUID format).
+  
+  ```typescript
+  event_id: '1234567890abcdef1234567890abcdef'
+  ```
+</ResponseField>
+
+### message
+
+<ResponseField name="message" type="string">
+  The log message or event description.
+  
+  ```typescript
+  message: 'User login failed'
+  ```
+</ResponseField>
+
+### timestamp
+
+<ResponseField name="timestamp" type="number">
+  Unix timestamp (seconds) when the event occurred.
+  
+  ```typescript
+  timestamp: 1234567890.123
+  ```
+</ResponseField>
+
+### level
+
+<ResponseField name="level" type="SeverityLevel">
+  Event severity: `'fatal'`, `'error'`, `'warning'`, `'info'`, `'debug'`, or `'log'`.
+  
+  ```typescript
+  level: 'error'
+  ```
+</ResponseField>
+
+### platform
+
+<ResponseField name="platform" type="string">
+  Platform identifier (e.g., `'javascript'`, `'node'`, `'python'`).
+  
+  ```typescript
+  platform: 'node'
+  ```
+</ResponseField>
+
+### release
+
+<ResponseField name="release" type="string">
+  Release version of the application.
+  
+  ```typescript
+  release: 'myapp@1.0.0'
+  ```
+</ResponseField>
+
+### environment
+
+<ResponseField name="environment" type="string">
+  Environment name (e.g., `'production'`, `'staging'`).
+  
+  ```typescript
+  environment: 'production'
+  ```
+</ResponseField>
+
+### tags
+
+<ResponseField name="tags" type="Record<string, Primitive>">
+  Key-value pairs for filtering and grouping.
+  
+  ```typescript
+  tags: {
+    transaction: 'checkout',
+    user_type: 'premium',
+    region: 'us-west'
+  }
+  ```
+</ResponseField>
+
+### extra
+
+<ResponseField name="extra" type="Extras">
+  Additional arbitrary data.
+  
+  ```typescript
+  extra: {
+    request_id: '12345',
+    user_metadata: {
+      plan: 'premium',
+      signup_date: '2024-01-01'
+    }
+  }
+  ```
+</ResponseField>
+
+### user
+
+<ResponseField name="user" type="User">
+  User information. See [User Types](/api/types/user) for details.
+  
+  ```typescript
+  user: {
+    id: '123',
+    email: 'user@example.com',
+    username: 'johndoe',
+    ip_address: '192.168.1.1'
+  }
+  ```
+</ResponseField>
+
+### contexts
+
+<ResponseField name="contexts" type="Contexts">
+  Additional context data organized by type.
+  
+  ```typescript
+  contexts: {
+    os: {
+      name: 'Linux',
+      version: '5.4.0'
+    },
+    runtime: {
+      name: 'node',
+      version: '18.0.0'
+    },
+    device: {
+      family: 'Desktop',
+      model: 'MacBook Pro'
+    }
+  }
+  ```
+</ResponseField>
+
+### breadcrumbs
+
+<ResponseField name="breadcrumbs" type="Breadcrumb[]">
+  Trail of events leading to the error. See [Breadcrumb Types](/api/types/breadcrumb).
+  
+  ```typescript
+  breadcrumbs: [
+    {
+      type: 'http',
+      category: 'fetch',
+      message: 'GET /api/users',
+      level: 'info',
+      timestamp: 1234567890
+    }
+  ]
+  ```
+</ResponseField>
+
+### exception
+
+<ResponseField name="exception" type="object">
+  Exception information.
+  
+  <ResponseField name="values" type="Exception[]">
+    Array of exception objects.
+    
+    ```typescript
+    exception: {
+      values: [{
+        type: 'TypeError',
+        value: 'Cannot read property of undefined',
+        stacktrace: {
+          frames: [/* ... */]
+        },
+        mechanism: {
+          type: 'generic',
+          handled: true
+        }
+      }]
+    }
+    ```
+  </ResponseField>
+</ResponseField>
+
+### request
+
+<ResponseField name="request" type="RequestEventData">
+  HTTP request information.
+  
+  ```typescript
+  request: {
+    url: 'https://example.com/api/users',
+    method: 'GET',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    query_string: 'page=1&limit=10',
+    data: { /* request body */ },
+    cookies: { /* cookies */ }
+  }
+  ```
+</ResponseField>
+
+### fingerprint
+
+<ResponseField name="fingerprint" type="string[]">
+  Custom grouping fingerprint.
+  
+  ```typescript
+  fingerprint: ['{{ default }}', 'database', 'connection-error']
+  ```
+</ResponseField>
+
+## Event Types
+
+```typescript
+export type EventType = 
+  | 'transaction' 
+  | 'profile' 
+  | 'replay_event' 
+  | 'feedback' 
+  | undefined;
+```
+
+### Error Event
+
+```typescript
+export interface ErrorEvent extends Event {
+  type: undefined;
+}
+```
+
+Default event type for errors:
+
+```typescript
+const errorEvent: ErrorEvent = {
+  message: 'Something went wrong',
+  level: 'error',
+  exception: {
+    values: [{
+      type: 'Error',
+      value: 'Something went wrong'
+    }]
+  }
+};
+```
+
+### Transaction Event
+
+```typescript
+export interface TransactionEvent extends Event {
+  type: 'transaction';
+  spans?: SpanJSON[];
+  start_timestamp: number;
+  timestamp: number;
+  transaction: string;
+}
+```
+
+Performance tracking event:
+
+```typescript
+const transactionEvent: TransactionEvent = {
+  type: 'transaction',
+  transaction: 'GET /api/users',
+  start_timestamp: 1234567890.0,
+  timestamp: 1234567891.5,
+  spans: [/* child spans */],
+  measurements: {
+    'lcp': { value: 2500, unit: 'millisecond' }
+  }
+};
+```
+
+## EventHint
+
+Additional context passed with events:
+
+```typescript
+export interface EventHint {
+  event_id?: string;
+  captureContext?: CaptureContext;
+  mechanism?: Partial<Mechanism>;
+  syntheticException?: Error | null;
+  originalException?: unknown;
+  attachments?: Attachment[];
+  data?: any;
+  integrations?: string[];
+}
+```
+
+### Fields
+
+<ResponseField name="originalException" type="unknown">
+  The original exception object.
+  
+  ```typescript
+  Sentry.captureException(error, {
+    originalException: error
+  });
+  ```
+</ResponseField>
+
+<ResponseField name="syntheticException" type="Error">
+  Synthetic exception for stack traces.
+  
+  ```typescript
+  Sentry.captureMessage('Message', {
+    syntheticException: new Error('Stack trace')
+  });
+  ```
+</ResponseField>
+
+<ResponseField name="attachments" type="Attachment[]">
+  File attachments to include.
+  
+  ```typescript
+  Sentry.captureException(error, {
+    attachments: [{
+      filename: 'log.txt',
+      data: logData,
+      contentType: 'text/plain'
+    }]
+  });
+  ```
+</ResponseField>
+
+## Exception
+
+```typescript
+export interface Exception {
+  type?: string;
+  value?: string;
+  mechanism?: Mechanism;
+  module?: string;
+  thread_id?: number;
+  stacktrace?: Stacktrace;
+}
+```
+
+### Example
+
+```typescript
+const exception: Exception = {
+  type: 'TypeError',
+  value: 'Cannot read property "name" of undefined',
+  mechanism: {
+    type: 'generic',
+    handled: true,
+    data: {
+      function: 'processUser'
+    }
+  },
+  stacktrace: {
+    frames: [
+      {
+        filename: 'app.js',
+        function: 'processUser',
+        lineno: 42,
+        colno: 15
+      }
+    ]
+  }
+};
+```
+
+## Mechanism
+
+```typescript
+export interface Mechanism {
+  type: string;
+  handled?: boolean;
+  data?: Record<string, any>;
+  synthetic?: boolean;
+  help_link?: string;
+  meta?: Record<string, any>;
+}
+```
+
+### Example
+
+```typescript
+const mechanism: Mechanism = {
+  type: 'promise',
+  handled: false,
+  data: {
+    function: 'fetchData'
+  }
+};
+```
+
+## Complete Example
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+const event: Event = {
+  event_id: Sentry.uuid4(),
+  timestamp: Date.now() / 1000,
+  level: 'error',
+  platform: 'node',
+  release: 'myapp@1.0.0',
+  environment: 'production',
+  
+  message: 'Payment processing failed',
+  
+  exception: {
+    values: [{
+      type: 'PaymentError',
+      value: 'Credit card declined',
+      mechanism: {
+        type: 'generic',
+        handled: true
+      }
+    }]
+  },
+  
+  user: {
+    id: 'user-123',
+    email: 'user@example.com'
+  },
+  
+  tags: {
+    payment_method: 'credit_card',
+    amount: '99.99',
+    currency: 'USD'
+  },
+  
+  extra: {
+    order_id: 'order-456',
+    attempts: 3,
+    last_error: 'Insufficient funds'
+  },
+  
+  contexts: {
+    payment: {
+      processor: 'stripe',
+      card_type: 'visa',
+      last_four: '4242'
+    }
+  },
+  
+  breadcrumbs: [
+    {
+      type: 'user',
+      category: 'action',
+      message: 'User clicked checkout',
+      level: 'info',
+      timestamp: Date.now() / 1000 - 5
+    },
+    {
+      type: 'http',
+      category: 'fetch',
+      message: 'POST /api/payment',
+      level: 'info',
+      data: {
+        status_code: 400
+      },
+      timestamp: Date.now() / 1000 - 2
+    }
+  ],
+  
+  fingerprint: ['payment-error', 'credit-card-declined']
+};
+
+Sentry.captureEvent(event);
+```
+
+## Related
+
+- [captureEvent](/api/capture/event)
+- [User Types](/api/types/user)
+- [Breadcrumb Types](/api/types/breadcrumb)
+- [Span Types](/api/types/span)

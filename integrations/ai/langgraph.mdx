@@ -1,0 +1,477 @@
+---
+title: 'LangGraph Integration'
+description: 'Monitor agent workflows and state graphs'
+---
+
+The LangGraph integration automatically instruments LangGraph applications, capturing agent creation, invocation, and state management.
+
+## Installation
+
+The integration is **enabled by default** in Node.js:
+
+```javascript
+import * as Sentry from '@sentry/node';
+
+Sentry.init({
+  dsn: 'your-dsn',
+  // langGraphIntegration is included by default
+});
+```
+
+## Basic Usage
+
+Just use LangGraph normally:
+
+```javascript
+import { StateGraph } from '@langchain/langgraph';
+import { ChatOpenAI } from '@langchain/openai';
+
+const model = new ChatOpenAI();
+
+// Define graph
+const workflow = new StateGraph({
+  channels: {
+    messages: {
+      value: (left, right) => left.concat(right),
+      default: () => [],
+    },
+  },
+});
+
+workflow.addNode('agent', async (state) => {
+  const response = await model.invoke(state.messages);
+  return { messages: [response] };
+});
+
+workflow.addEdge('__start__', 'agent');
+workflow.addEdge('agent', '__end__');
+
+// Automatically instrumented
+const app = workflow.compile();
+const result = await app.invoke({
+  messages: [{ role: 'user', content: 'Hello!' }],
+});
+```
+
+## Configuration
+
+### Default Behavior
+
+By default, inputs and outputs are **not captured**:
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  sendDefaultPii: false, // Default: no inputs/outputs
+});
+```
+
+### Capture Inputs and Outputs
+
+<Tabs>
+  <Tab title="Global Setting">
+    Enable for all AI integrations:
+
+    ```javascript
+    Sentry.init({
+      dsn: 'your-dsn',
+      sendDefaultPii: true, // Captures all inputs/outputs
+    });
+    ```
+  </Tab>
+  
+  <Tab title="LangGraph Only">
+    Enable only for LangGraph:
+
+    ```javascript
+    Sentry.init({
+      dsn: 'your-dsn',
+      sendDefaultPii: false,
+      integrations: [
+        Sentry.langGraphIntegration({
+          recordInputs: true,
+          recordOutputs: true,
+        }),
+      ],
+    });
+    ```
+  </Tab>
+</Tabs>
+
+## Integration Options
+
+<ParamField path="recordInputs" type="boolean" default="sendDefaultPii">
+  Capture input messages from graph state
+</ParamField>
+
+<ParamField path="recordOutputs" type="boolean" default="sendDefaultPii">
+  Capture output messages and responses
+</ParamField>
+
+## Captured Operations
+
+The integration captures two main operations:
+
+### Agent Creation
+
+```javascript
+const workflow = new StateGraph({...});
+// ... add nodes and edges
+
+// Creates: gen_ai.create_agent span
+const app = workflow.compile();
+```
+
+**Captured Data:**
+- Agent name
+- Available tools
+- Graph configuration
+
+### Agent Invocation
+
+```javascript
+// Creates: gen_ai.invoke_agent span
+const result = await app.invoke({ messages: [...] });
+```
+
+**Captured Data:**
+- Input messages (if `recordInputs: true`)
+- Output messages (if `recordOutputs: true`)
+- Tool calls made during execution
+- Graph state transitions
+
+## Practical Examples
+
+### Simple Agent
+
+```javascript
+import * as Sentry from '@sentry/node';
+import { StateGraph } from '@langchain/langgraph';
+import { ChatOpenAI } from '@langchain/openai';
+
+const model = new ChatOpenAI({ modelName: 'gpt-4' });
+
+const workflow = new StateGraph({
+  channels: {
+    messages: {
+      value: (left, right) => left.concat(right),
+      default: () => [],
+    },
+  },
+});
+
+workflow.addNode('assistant', async (state) => {
+  const response = await model.invoke(state.messages);
+  return { messages: [response] };
+});
+
+workflow.addEdge('__start__', 'assistant');
+workflow.addEdge('assistant', '__end__');
+
+const app = workflow.compile();
+
+// Automatically tracked
+const result = await app.invoke({
+  messages: [{ role: 'user', content: 'What is AI?' }],
+});
+```
+
+### Agent with Tools
+
+```javascript
+import { StateGraph } from '@langchain/langgraph';
+import { ChatOpenAI } from '@langchain/openai';
+import { DynamicTool } from '@langchain/core/tools';
+
+const model = new ChatOpenAI({ modelName: 'gpt-4' });
+
+const tools = [
+  new DynamicTool({
+    name: 'search',
+    description: 'Search the web',
+    func: async (query) => {
+      return `Search results for: ${query}`;
+    },
+  }),
+  new DynamicTool({
+    name: 'calculator',
+    description: 'Perform calculations',
+    func: async (expression) => {
+      return eval(expression).toString();
+    },
+  }),
+];
+
+const workflow = new StateGraph({
+  channels: {
+    messages: { value: (l, r) => l.concat(r), default: () => [] },
+    toolCalls: { value: null },
+  },
+});
+
+// Agent node - decides whether to use tools
+workflow.addNode('agent', async (state) => {
+  const response = await model.invoke(state.messages, {
+    tools: tools.map(t => ({
+      name: t.name,
+      description: t.description,
+    })),
+  });
+  
+  return {
+    messages: [response],
+    toolCalls: response.tool_calls || [],
+  };
+});
+
+// Tool execution node
+workflow.addNode('tools', async (state) => {
+  const results = [];
+  
+  for (const toolCall of state.toolCalls) {
+    const tool = tools.find(t => t.name === toolCall.name);
+    if (tool) {
+      const result = await tool.func(toolCall.args);
+      results.push({
+        role: 'tool',
+        content: result,
+        tool_call_id: toolCall.id,
+      });
+    }
+  }
+  
+  return { messages: results };
+});
+
+// Conditional edge - use tools if needed
+workflow.addConditionalEdges(
+  'agent',
+  (state) => (state.toolCalls?.length > 0 ? 'tools' : '__end__'),
+  {
+    tools: 'tools',
+    __end__: '__end__',
+  }
+);
+
+workflow.addEdge('__start__', 'agent');
+workflow.addEdge('tools', 'agent');
+
+const app = workflow.compile();
+
+// Tool usage automatically tracked
+const result = await app.invoke({
+  messages: [{ role: 'user', content: 'What is 15 * 23?' }],
+});
+```
+
+### Multi-Agent System
+
+```javascript
+import { StateGraph } from '@langchain/langgraph';
+import { ChatOpenAI } from '@langchain/openai';
+
+const researcher = new ChatOpenAI({ modelName: 'gpt-4' });
+const writer = new ChatOpenAI({ modelName: 'gpt-4' });
+const editor = new ChatOpenAI({ modelName: 'gpt-4' });
+
+const workflow = new StateGraph({
+  channels: {
+    topic: { value: null },
+    research: { value: null },
+    draft: { value: null },
+    final: { value: null },
+  },
+});
+
+// Research agent
+workflow.addNode('research', async (state) => {
+  const response = await researcher.invoke(
+    `Research the topic: ${state.topic}`
+  );
+  return { research: response.content };
+});
+
+// Writer agent
+workflow.addNode('write', async (state) => {
+  const response = await writer.invoke(
+    `Write an article based on this research:\n${state.research}`
+  );
+  return { draft: response.content };
+});
+
+// Editor agent
+workflow.addNode('edit', async (state) => {
+  const response = await editor.invoke(
+    `Edit and improve this article:\n${state.draft}`
+  );
+  return { final: response.content };
+});
+
+workflow.addEdge('__start__', 'research');
+workflow.addEdge('research', 'write');
+workflow.addEdge('write', 'edit');
+workflow.addEdge('edit', '__end__');
+
+const app = workflow.compile();
+
+// Full multi-agent workflow tracked
+const result = await app.invoke({
+  topic: 'The future of artificial intelligence',
+});
+```
+
+### Stateful Conversation
+
+```javascript
+import { StateGraph } from '@langchain/langgraph';
+import { ChatOpenAI } from '@langchain/openai';
+import { MemorySaver } from '@langchain/langgraph';
+
+const model = new ChatOpenAI();
+
+const workflow = new StateGraph({
+  channels: {
+    messages: {
+      value: (left, right) => left.concat(right),
+      default: () => [],
+    },
+  },
+});
+
+workflow.addNode('chat', async (state) => {
+  const response = await model.invoke(state.messages);
+  return { messages: [response] };
+});
+
+workflow.addEdge('__start__', 'chat');
+workflow.addEdge('chat', '__end__');
+
+// Compile with memory
+const checkpointer = new MemorySaver();
+const app = workflow.compile({ checkpointer });
+
+// Conversation with state
+const config = { configurable: { thread_id: 'conversation-1' } };
+
+// First message
+await app.invoke(
+  { messages: [{ role: 'user', content: 'My name is Alice' }] },
+  config
+);
+
+// Second message - remembers context
+await app.invoke(
+  { messages: [{ role: 'user', content: 'What is my name?' }] },
+  config
+);
+// Response: "Your name is Alice"
+```
+
+## Captured Span Attributes
+
+When `recordInputs` and `recordOutputs` are enabled:
+
+```javascript
+{
+  // Agent creation
+  'gen_ai.agent.name': 'my_agent',
+  'gen_ai.agent.tools': ['search', 'calculator'],
+  
+  // Agent invocation
+  'gen_ai.operation.name': 'invoke_agent',
+  'gen_ai.prompt.0.role': 'user',
+  'gen_ai.prompt.0.content': 'What is 2+2?',
+  'gen_ai.completion.0.role': 'assistant',
+  'gen_ai.completion.0.content': '2+2 equals 4',
+  
+  // Tool usage
+  'gen_ai.tool_calls': [
+    { name: 'calculator', args: '2+2', result: '4' }
+  ],
+}
+```
+
+## Viewing LangGraph Data
+
+LangGraph operations appear as spans:
+
+```
+Transaction: POST /api/agent
+├─ gen_ai.create_agent
+│  └─ Duration: 5ms
+├─ gen_ai.invoke_agent
+│  ├─ langchain.llm.start (GPT-4)
+│  │  └─ Duration: 2.1s
+│  ├─ langchain.tool.start (calculator)
+│  │  └─ Duration: 15ms
+│  └─ Duration: 2.5s
+└─ Total: 2.5s
+```
+
+## Performance Monitoring
+
+- **Agent Execution Time**: Track workflow performance
+- **Tool Performance**: Monitor tool call latency
+- **State Transitions**: Identify bottlenecks
+- **Error Rates**: Track failures in agent execution
+
+## Source Code
+
+The LangGraph integration is implemented in:
+
+`packages/node/src/integrations/tracing/langgraph/index.ts:11`
+
+## Best Practices
+
+<Tip>
+  Use descriptive node names for better observability in traces.
+</Tip>
+
+### Add Custom Context
+
+```javascript
+workflow.addNode('agent', async (state) => {
+  return await Sentry.startSpan(
+    {
+      name: 'Agent Decision',
+      attributes: {
+        'agent.state_size': JSON.stringify(state).length,
+        'agent.message_count': state.messages.length,
+      },
+    },
+    async () => {
+      const response = await model.invoke(state.messages);
+      return { messages: [response] };
+    }
+  );
+});
+```
+
+## Troubleshooting
+
+### Spans Not Appearing
+
+Ensure tracing is enabled:
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  tracesSampleRate: 1.0,
+});
+```
+
+### Missing Tool Data
+
+Enable output recording to capture tool calls:
+
+```javascript
+Sentry.langGraphIntegration({
+  recordOutputs: true,
+});
+```
+
+## Related
+
+- [AI Monitoring Overview](/integrations/ai/overview)
+- [LangChain Integration](/integrations/ai/langchain)
+- [OpenAI Integration](/integrations/ai/openai)

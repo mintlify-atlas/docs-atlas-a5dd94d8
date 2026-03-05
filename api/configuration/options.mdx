@@ -1,0 +1,530 @@
+---
+title: "Configuration Options"
+description: "Complete reference for Sentry SDK configuration options"
+---
+
+Configuration options control the behavior of the Sentry SDK.
+
+## Basic Options
+
+### dsn
+
+<ParamField path="dsn" type="string">
+  The Data Source Name tells the SDK where to send events. Required for sending data to Sentry.
+  
+  ```typescript
+  Sentry.init({
+    dsn: 'https://examplePublicKey@o0.ingest.sentry.io/0'
+  });
+  ```
+</ParamField>
+
+### environment
+
+<ParamField path="environment" type="string" default="production">
+  The environment your application is running in.
+  
+  ```typescript
+  Sentry.init({
+    dsn: 'your-dsn',
+    environment: process.env.NODE_ENV // 'production', 'staging', 'development'
+  });
+  ```
+</ParamField>
+
+### release
+
+<ParamField path="release" type="string">
+  The release version of your application. Used to track regressions and associate source maps.
+  
+  ```typescript
+  Sentry.init({
+    dsn: 'your-dsn',
+    release: 'myapp@1.0.0'
+  });
+  ```
+</ParamField>
+
+### dist
+
+<ParamField path="dist" type="string">
+  The distribution identifier. Used to disambiguate build or deployment variants.
+  
+  ```typescript
+  Sentry.init({
+    dsn: 'your-dsn',
+    release: 'myapp@1.0.0',
+    dist: '123'
+  });
+  ```
+</ParamField>
+
+## Sampling Options
+
+### sampleRate
+
+<ParamField path="sampleRate" type="number" default="1.0">
+  Sample rate for error events. Value between 0.0 (0%) and 1.0 (100%).
+  
+  ```typescript
+  Sentry.init({
+    dsn: 'your-dsn',
+    sampleRate: 0.5 // Sample 50% of error events
+  });
+  ```
+</ParamField>
+
+### tracesSampleRate
+
+<ParamField path="tracesSampleRate" type="number">
+  Sample rate for transaction events. Value between 0.0 (0%) and 1.0 (100%).
+  
+  ```typescript
+  Sentry.init({
+    dsn: 'your-dsn',
+    tracesSampleRate: 0.1 // Sample 10% of transactions
+  });
+  ```
+</ParamField>
+
+### tracesSampler
+
+<ParamField path="tracesSampler" type="function">
+  Dynamic sampling function for fine-grained control over trace sampling.
+  
+  ```typescript
+  Sentry.init({
+    dsn: 'your-dsn',
+    tracesSampler: (samplingContext) => {
+      // Sample 100% of checkout transactions
+      if (samplingContext.name?.includes('checkout')) {
+        return 1.0;
+      }
+      
+      // Sample 10% of other transactions
+      return 0.1;
+    }
+  });
+  ```
+</ParamField>
+
+## Event Processing
+
+### beforeSend
+
+<ParamField path="beforeSend" type="function">
+  Called before sending error events. Can modify or drop events.
+  
+  ```typescript
+  Sentry.init({
+    dsn: 'your-dsn',
+    beforeSend(event, hint) {
+      // Filter out errors from browser extensions
+      if (event.exception?.values?.[0]?.stacktrace?.frames?.some(
+        frame => frame.filename?.includes('extension://')
+      )) {
+        return null; // Drop event
+      }
+      
+      // Scrub sensitive data
+      if (event.request?.data) {
+        delete event.request.data.password;
+      }
+      
+      return event;
+    }
+  });
+  ```
+</ParamField>
+
+### beforeSendTransaction
+
+<ParamField path="beforeSendTransaction" type="function">
+  Called before sending transaction events.
+  
+  ```typescript
+  Sentry.init({
+    dsn: 'your-dsn',
+    beforeSendTransaction(event, hint) {
+      // Don't send transactions for health checks
+      if (event.transaction === 'GET /health') {
+        return null;
+      }
+      return event;
+    }
+  });
+  ```
+</ParamField>
+
+### beforeBreadcrumb
+
+<ParamField path="beforeBreadcrumb" type="function">
+  Called before adding a breadcrumb. Can modify or drop breadcrumbs.
+  
+  ```typescript
+  Sentry.init({
+    dsn: 'your-dsn',
+    beforeBreadcrumb(breadcrumb, hint) {
+      // Filter out console breadcrumbs
+      if (breadcrumb.category === 'console') {
+        return null;
+      }
+      
+      // Scrub URLs
+      if (breadcrumb.data?.url) {
+        breadcrumb.data.url = breadcrumb.data.url.replace(
+          /token=[^&]+/,
+          'token=REDACTED'
+        );
+      }
+      
+      return breadcrumb;
+    }
+  });
+  ```
+</ParamField>
+
+## Integrations
+
+### integrations
+
+<ParamField path="integrations" type="Integration[]" required>
+  List of integrations to enable. See [Integrations](/api/core/integrations) for details.
+  
+  ```typescript
+  import * as Sentry from '@sentry/node';
+  import { httpIntegration, captureConsoleIntegration } from '@sentry/node';
+  
+  Sentry.init({
+    dsn: 'your-dsn',
+    integrations: [
+      httpIntegration(),
+      captureConsoleIntegration({ levels: ['error'] })
+    ]
+  });
+  ```
+</ParamField>
+
+## Data Limits
+
+### maxBreadcrumbs
+
+<ParamField path="maxBreadcrumbs" type="number" default="100">
+  Maximum number of breadcrumbs to keep.
+  
+  ```typescript
+  Sentry.init({
+    dsn: 'your-dsn',
+    maxBreadcrumbs: 50
+  });
+  ```
+</ParamField>
+
+### maxValueLength
+
+<ParamField path="maxValueLength" type="number" default="250">
+  Maximum string length before truncation.
+  
+  ```typescript
+  Sentry.init({
+    dsn: 'your-dsn',
+    maxValueLength: 1000
+  });
+  ```
+</ParamField>
+
+### normalizeDepth
+
+<ParamField path="normalizeDepth" type="number" default="3">
+  Maximum depth to traverse in objects.
+  
+  ```typescript
+  Sentry.init({
+    dsn: 'your-dsn',
+    normalizeDepth: 5
+  });
+  ```
+</ParamField>
+
+### normalizeMaxBreadth
+
+<ParamField path="normalizeMaxBreadth" type="number" default="1000">
+  Maximum properties/elements in arrays or objects.
+  
+  ```typescript
+  Sentry.init({
+    dsn: 'your-dsn',
+    normalizeMaxBreadth: 100
+  });
+  ```
+</ParamField>
+
+## Filtering
+
+### ignoreErrors
+
+<ParamField path="ignoreErrors" type="Array<string | RegExp>" default="[]">
+  Errors matching these patterns won't be sent.
+  
+  ```typescript
+  Sentry.init({
+    dsn: 'your-dsn',
+    ignoreErrors: [
+      'Non-Error promise rejection',
+      /^NetworkError/,
+      'ResizeObserver loop limit exceeded'
+    ]
+  });
+  ```
+</ParamField>
+
+### ignoreTransactions
+
+<ParamField path="ignoreTransactions" type="Array<string | RegExp>" default="[]">
+  Transactions matching these patterns won't be sent.
+  
+  ```typescript
+  Sentry.init({
+    dsn: 'your-dsn',
+    ignoreTransactions: [
+      'GET /health',
+      /^\/api\/internal/
+    ]
+  });
+  ```
+</ParamField>
+
+### allowUrls
+
+<ParamField path="allowUrls" type="Array<string | RegExp>" default="[]">
+  Only send errors from URLs matching these patterns.
+  
+  ```typescript
+  Sentry.init({
+    dsn: 'your-dsn',
+    allowUrls: [
+      /^https:\/\/myapp\.com/,
+      'cdn.myapp.com'
+    ]
+  });
+  ```
+</ParamField>
+
+### denyUrls
+
+<ParamField path="denyUrls" type="Array<string | RegExp>" default="[]">
+  Don't send errors from URLs matching these patterns.
+  
+  ```typescript
+  Sentry.init({
+    dsn: 'your-dsn',
+    denyUrls: [
+      /extensions\//i,
+      'chrome-extension://'
+    ]
+  });
+  ```
+</ParamField>
+
+## Tracing
+
+### tracePropagationTargets
+
+<ParamField path="tracePropagationTargets" type="TracePropagationTargets">
+  Control which outgoing requests get tracing headers. See [Propagation](/api/tracing/propagation) for details.
+  
+  ```typescript
+  Sentry.init({
+    dsn: 'your-dsn',
+    tracePropagationTargets: [
+      'localhost',
+      /^https:\/\/api\.myapp\.com/
+    ]
+  });
+  ```
+</ParamField>
+
+### propagateTraceparent
+
+<ParamField path="propagateTraceparent" type="boolean" default="false">
+  Enable W3C `traceparent` header propagation.
+  
+  ```typescript
+  Sentry.init({
+    dsn: 'your-dsn',
+    propagateTraceparent: true
+  });
+  ```
+</ParamField>
+
+## Transport
+
+### transport
+
+<ParamField path="transport" type="function" required>
+  Transport factory function. Usually provided by the SDK.
+  
+  ```typescript
+  import { makeNodeTransport } from '@sentry/node';
+  
+  Sentry.init({
+    dsn: 'your-dsn',
+    transport: makeNodeTransport
+  });
+  ```
+</ParamField>
+
+### transportOptions
+
+<ParamField path="transportOptions" type="TransportOptions">
+  Options for the transport. See [Transport Options](/api/configuration/transport-options) for details.
+  
+  ```typescript
+  Sentry.init({
+    dsn: 'your-dsn',
+    transportOptions: {
+      bufferSize: 30,
+      headers: {
+        'X-Custom-Header': 'value'
+      }
+    }
+  });
+  ```
+</ParamField>
+
+### tunnel
+
+<ParamField path="tunnel" type="string">
+  Proxy endpoint for forwarding events.
+  
+  ```typescript
+  Sentry.init({
+    dsn: 'your-dsn',
+    tunnel: '/api/tunnel'
+  });
+  ```
+</ParamField>
+
+## Debug Options
+
+### debug
+
+<ParamField path="debug" type="boolean" default="false">
+  Enable debug logging.
+  
+  ```typescript
+  Sentry.init({
+    dsn: 'your-dsn',
+    debug: true
+  });
+  ```
+</ParamField>
+
+### enabled
+
+<ParamField path="enabled" type="boolean" default="true">
+  Enable or disable the SDK.
+  
+  ```typescript
+  Sentry.init({
+    dsn: 'your-dsn',
+    enabled: process.env.NODE_ENV === 'production'
+  });
+  ```
+</ParamField>
+
+## Privacy
+
+### sendDefaultPii
+
+<ParamField path="sendDefaultPii" type="boolean" default="false">
+  Send personally identifiable information by default.
+  
+  ```typescript
+  Sentry.init({
+    dsn: 'your-dsn',
+    sendDefaultPii: false
+  });
+  ```
+</ParamField>
+
+## Server Options
+
+### serverName
+
+<ParamField path="serverName" type="string">
+  Server or device name.
+  
+  ```typescript
+  Sentry.init({
+    dsn: 'your-dsn',
+    serverName: 'web-server-01'
+  });
+  ```
+</ParamField>
+
+### shutdownTimeout
+
+<ParamField path="shutdownTimeout" type="number" default="2000">
+  Milliseconds to wait before shutdown.
+  
+  ```typescript
+  Sentry.init({
+    dsn: 'your-dsn',
+    shutdownTimeout: 5000
+  });
+  ```
+</ParamField>
+
+## Complete Example
+
+```typescript
+import * as Sentry from '@sentry/node';
+import { httpIntegration, captureConsoleIntegration } from '@sentry/node';
+
+Sentry.init({
+  // Basic
+  dsn: 'your-dsn',
+  environment: process.env.NODE_ENV,
+  release: 'myapp@1.0.0',
+  
+  // Sampling
+  sampleRate: 1.0,
+  tracesSampleRate: 0.1,
+  
+  // Event Processing
+  beforeSend(event) {
+    if (event.request?.data) {
+      delete event.request.data.password;
+    }
+    return event;
+  },
+  
+  // Integrations
+  integrations: [
+    httpIntegration(),
+    captureConsoleIntegration({ levels: ['error'] })
+  ],
+  
+  // Data Limits
+  maxBreadcrumbs: 100,
+  maxValueLength: 250,
+  
+  // Filtering
+  ignoreErrors: ['ResizeObserver loop limit exceeded'],
+  
+  // Tracing
+  tracePropagationTargets: ['localhost', /^https:\/\/api\./],
+  
+  // Debug
+  debug: false,
+  enabled: true
+});
+```
+
+## Related
+
+- [Transport Options](/api/configuration/transport-options)
+- [Sampling](/api/configuration/sampling)
+- [Integrations](/api/core/integrations)
+- [Client](/api/core/client)

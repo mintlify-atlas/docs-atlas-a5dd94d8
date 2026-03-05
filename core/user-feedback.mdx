@@ -1,0 +1,480 @@
+---
+title: "User Feedback"
+description: "Collect feedback from users when errors occur"
+---
+
+User Feedback allows you to collect feedback from users when they encounter errors, providing valuable context directly from the people experiencing issues.
+
+## Capturing Feedback
+
+Use `captureFeedback()` to send user feedback to Sentry:
+
+```javascript
+import * as Sentry from '@sentry/browser';
+
+Sentry.captureFeedback({
+  name: 'John Doe',
+  email: 'john@example.com',
+  message: 'The checkout page crashed when I tried to apply a coupon.',
+});
+```
+
+<Note>
+Feedback appears in Sentry as a special event type that can be viewed alongside errors and performance data.
+</Note>
+
+## Feedback Parameters
+
+### Required Fields
+
+```javascript
+Sentry.captureFeedback({
+  // User's name (required)
+  name: 'Jane Smith',
+  
+  // User's email (required)
+  email: 'jane@example.com',
+  
+  // Feedback message (required)
+  message: 'I encountered an error when uploading files.',
+});
+```
+
+### Optional Fields
+
+```javascript
+Sentry.captureFeedback({
+  name: 'Jane Smith',
+  email: 'jane@example.com',
+  message: 'Upload failed with error.',
+  
+  // Associate with a specific error
+  associatedEventId: '1234567890abcdef',
+  
+  // Current page URL
+  url: window.location.href,
+  
+  // Feedback source
+  source: 'widget', // or 'api', 'email', etc.
+  
+  // Custom tags
+  tags: {
+    priority: 'high',
+    category: 'upload'
+  }
+});
+```
+
+## Associating with Errors
+
+Link feedback to specific error events:
+
+```javascript
+try {
+  uploadFile();
+} catch (error) {
+  // Capture the error
+  const eventId = Sentry.captureException(error);
+  
+  // Show feedback dialog
+  const feedback = prompt('What happened?');
+  
+  if (feedback) {
+    // Link feedback to the error
+    Sentry.captureFeedback({
+      name: user.name,
+      email: user.email,
+      message: feedback,
+      associatedEventId: eventId
+    });
+  }
+}
+```
+
+<Tip>
+Associating feedback with errors helps you understand the user's perspective on what went wrong.
+</Tip>
+
+## User Feedback Widget
+
+Sentry provides a pre-built feedback widget:
+
+```javascript
+import * as Sentry from '@sentry/browser';
+import { feedbackIntegration } from '@sentry/browser';
+
+Sentry.init({
+  dsn: 'your-dsn',
+  integrations: [
+    feedbackIntegration({
+      // Button label
+      buttonLabel: 'Report Bug',
+      
+      // Form title
+      formTitle: 'Report a Bug',
+      
+      // Submit button text
+      submitButtonLabel: 'Send Report',
+      
+      // Success message
+      successMessageText: 'Thank you for your report!',
+      
+      // Show name/email fields
+      showName: true,
+      showEmail: true,
+      
+      // Required fields
+      isNameRequired: false,
+      isEmailRequired: false,
+    }),
+  ],
+});
+```
+
+### Widget Configuration
+
+```javascript
+feedbackIntegration({
+  // Widget appearance
+  colorScheme: 'light', // or 'dark', 'system'
+  buttonLabel: 'Feedback',
+  formTitle: 'Send Feedback',
+  
+  // Form fields
+  showName: true,
+  showEmail: true,
+  showBranding: true,
+  
+  // Required fields
+  isNameRequired: true,
+  isEmailRequired: true,
+  
+  // Messages
+  submitButtonLabel: 'Submit',
+  cancelButtonLabel: 'Cancel',
+  successMessageText: 'Thank you!',
+  errorMessageText: 'An error occurred. Please try again.',
+  
+  // Labels
+  nameLabel: 'Name',
+  namePlaceholder: 'Your name',
+  emailLabel: 'Email',
+  emailPlaceholder: 'your.email@example.com',
+  messageLabel: 'Description',
+  messagePlaceholder: 'What happened?',
+  
+  // Auto-inject button
+  autoInject: true,
+  
+  // Custom trigger selector
+  trigger: '.feedback-button',
+  
+  // Lifecycle hooks
+  onFormOpen: () => console.log('Feedback form opened'),
+  onFormClose: () => console.log('Feedback form closed'),
+  onSubmitSuccess: (data) => console.log('Feedback submitted', data),
+  onSubmitError: (error) => console.error('Feedback error', error),
+})
+```
+
+### Programmatic Control
+
+```javascript
+import { getClient } from '@sentry/browser';
+
+const client = getClient();
+const feedback = client?.getIntegrationByName('Feedback');
+
+if (feedback) {
+  // Open the feedback dialog
+  feedback.openDialog();
+  
+  // Close the feedback dialog
+  feedback.closeDialog();
+  
+  // Remove the widget
+  feedback.remove();
+}
+```
+
+## Custom Feedback UI
+
+Build your own feedback UI:
+
+```javascript
+// HTML
+// <button id="feedback-btn">Send Feedback</button>
+// <dialog id="feedback-modal">
+//   <form id="feedback-form">
+//     <input name="name" placeholder="Name" required />
+//     <input name="email" type="email" placeholder="Email" required />
+//     <textarea name="message" placeholder="Message" required></textarea>
+//     <button type="submit">Submit</button>
+//   </form>
+// </dialog>
+
+document.getElementById('feedback-btn').addEventListener('click', () => {
+  document.getElementById('feedback-modal').showModal();
+});
+
+document.getElementById('feedback-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  
+  const formData = new FormData(e.target);
+  
+  Sentry.captureFeedback({
+    name: formData.get('name'),
+    email: formData.get('email'),
+    message: formData.get('message'),
+    url: window.location.href,
+    source: 'custom-form'
+  });
+  
+  document.getElementById('feedback-modal').close();
+  alert('Thank you for your feedback!');
+});
+```
+
+## Feedback on Errors
+
+Automatically prompt for feedback when errors occur:
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  
+  beforeSend(event, hint) {
+    // Only for unhandled errors
+    if (event.exception && !hint.syntheticException) {
+      // Show feedback dialog
+      const eventId = event.event_id;
+      
+      setTimeout(() => {
+        const message = prompt(
+          'It looks like something went wrong. Can you describe what happened?'
+        );
+        
+        if (message) {
+          Sentry.captureFeedback({
+            name: 'Anonymous',
+            email: 'anonymous@example.com',
+            message,
+            associatedEventId: eventId
+          });
+        }
+      }, 100);
+    }
+    
+    return event;
+  }
+});
+```
+
+<Warning>
+Prompting users for feedback on every error can be disruptive. Consider only prompting for critical errors or using a less intrusive widget.
+</Warning>
+
+## Feedback with Context
+
+Include additional context with feedback:
+
+```javascript
+import * as Sentry from '@sentry/browser';
+
+function submitFeedback(userInput) {
+  Sentry.captureFeedback(
+    {
+      name: user.name,
+      email: user.email,
+      message: userInput,
+      tags: {
+        page: window.location.pathname,
+        feature: currentFeature,
+        plan: user.subscriptionPlan
+      }
+    },
+    {
+      // Include replay if available
+      includeReplay: true
+    }
+  );
+}
+```
+
+## Screenshot with Feedback
+
+Capture screenshots with feedback:
+
+```javascript
+import html2canvas from 'html2canvas';
+
+async function captureFeedbackWithScreenshot(message) {
+  // Capture screenshot
+  const canvas = await html2canvas(document.body);
+  const screenshot = canvas.toDataURL();
+  
+  // Send feedback with screenshot as attachment
+  Sentry.captureFeedback(
+    {
+      name: user.name,
+      email: user.email,
+      message
+    },
+    {
+      attachments: [
+        {
+          filename: 'screenshot.png',
+          data: screenshot,
+          contentType: 'image/png'
+        }
+      ]
+    }
+  );
+}
+```
+
+<Note>
+Screenshots are stored as attachments and visible in the Sentry UI alongside the feedback.
+</Note>
+
+## Practical Examples
+
+### E-commerce Checkout
+
+```javascript
+// Show feedback widget on checkout errors
+try {
+  await processPayment();
+} catch (error) {
+  const eventId = Sentry.captureException(error);
+  
+  // Show feedback dialog
+  const client = getClient();
+  const feedback = client?.getIntegrationByName('Feedback');
+  
+  if (feedback) {
+    // Pre-fill with context
+    feedback.openDialog({
+      associatedEventId: eventId,
+      message: 'Payment processing failed. Please describe what happened.'
+    });
+  }
+}
+```
+
+### Feature Feedback
+
+```javascript
+// Collect feedback on beta features
+function showBetaFeedbackPrompt() {
+  Sentry.captureFeedback({
+    name: user.name,
+    email: user.email,
+    message: document.getElementById('feedback-input').value,
+    source: 'beta-feature',
+    tags: {
+      feature: 'new-dashboard',
+      version: 'beta-1.0'
+    }
+  });
+  
+  showNotification('Thank you for your feedback!');
+}
+```
+
+### Support Ticket Creation
+
+```javascript
+// Create support ticket from feedback
+async function createTicket(feedback) {
+  // Send to Sentry
+  const feedbackId = Sentry.captureFeedback({
+    name: feedback.name,
+    email: feedback.email,
+    message: feedback.message,
+    source: 'support-widget'
+  });
+  
+  // Also send to support system
+  await supportAPI.createTicket({
+    ...feedback,
+    sentryFeedbackId: feedbackId
+  });
+}
+```
+
+## Viewing Feedback
+
+Feedback appears in Sentry:
+
+1. **Feedback Tab**: View all feedback
+2. **Issues**: Feedback linked to errors
+3. **User Details**: All feedback from a specific user
+
+Each feedback includes:
+- User contact information
+- Message content
+- Associated error (if linked)
+- Page URL
+- Browser/device info
+- Tags and context
+- Replay (if available)
+
+## Best Practices
+
+1. **Make it easy**: Low-friction feedback collection
+2. **Provide context**: Include page URL and error details
+3. **Respect privacy**: Don't require personal info
+4. **Close the loop**: Respond to feedback
+5. **Link to errors**: Associate feedback with specific issues
+6. **Use appropriate timing**: Don't interrupt critical flows
+7. **Thank users**: Show appreciation for feedback
+
+## Privacy Considerations
+
+```javascript
+// Don't require email
+feedbackIntegration({
+  showEmail: true,
+  isEmailRequired: false // Optional email
+})
+
+// Allow anonymous feedback
+Sentry.captureFeedback({
+  name: 'Anonymous',
+  email: 'anonymous@example.com',
+  message: userMessage
+});
+
+// Scrub sensitive data
+Sentry.init({
+  beforeSend(event) {
+    if (event.type === 'feedback') {
+      // Remove PII from feedback
+      event.message = scrubPII(event.message);
+    }
+    return event;
+  }
+});
+```
+
+<Warning>
+Comply with privacy regulations (GDPR, CCPA, etc.) when collecting user feedback. Provide clear privacy notices and obtain consent where required.
+</Warning>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Error Monitoring" icon="bug" href="/core/error-monitoring">
+    Link feedback to error events
+  </Card>
+  <Card title="Session Replay" icon="video" href="/core/session-replay">
+    Include replays with feedback
+  </Card>
+  <Card title="Context" icon="info-circle" href="/core/context">
+    Add context to feedback
+  </Card>
+  <Card title="Scopes" icon="layer-group" href="/core/scopes">
+    Manage feedback scope data
+  </Card>
+</CardGroup>

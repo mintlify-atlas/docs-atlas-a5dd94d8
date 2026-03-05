@@ -1,0 +1,473 @@
+---
+title: "Distributed Tracing"
+description: "Track requests across multiple services and systems"
+---
+
+Distributed tracing allows you to follow a single request as it flows through multiple services, providing end-to-end visibility into your application's performance.
+
+## How Distributed Tracing Works
+
+Distributed tracing connects spans across service boundaries by propagating trace context through HTTP headers:
+
+1. **Service A** starts a trace and adds trace headers to outgoing requests
+2. **Service B** continues the trace by reading the headers and creating child spans
+3. **Service C** continues the same trace, creating a complete picture
+
+All spans share the same **Trace ID**, allowing Sentry to group them together.
+
+## Automatic Instrumentation
+
+Sentry automatically propagates trace context for common HTTP clients:
+
+```javascript
+import * as Sentry from '@sentry/node';
+
+Sentry.init({
+  dsn: 'your-dsn',
+  tracesSampleRate: 1.0,
+  
+  // Automatically instrument fetch, http, https
+  integrations: [
+    Sentry.httpIntegration(),
+  ]
+});
+
+// Trace context is automatically propagated
+await fetch('https://api.example.com/users');
+```
+
+<Note>
+Trace headers (`sentry-trace` and `baggage`) are automatically added to outgoing requests for services in your `tracePropagationTargets`.
+</Note>
+
+## Trace Propagation Targets
+
+Control which requests include trace headers:
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  tracesSampleRate: 1.0,
+  
+  // Only propagate to these targets
+  tracePropagationTargets: [
+    'localhost',
+    /^https:\/\/api\.example\.com/,
+    /^https:\/\/.*\.example\.com/
+  ]
+});
+```
+
+### Default Behavior
+
+By default, trace context is propagated to:
+- `localhost` (all ports)
+- Same-origin requests
+
+```javascript
+// Default: propagate to localhost and same origin
+tracePropagationTargets: ['localhost', /^\//]
+```
+
+<Warning>
+Be careful with wildcards. Don't propagate trace headers to third-party services unless necessary, as this could leak trace information.
+</Warning>
+
+## Continuing Traces
+
+### Server-Side
+
+Continue a trace from incoming request headers:
+
+```javascript
+import * as Sentry from '@sentry/node';
+import express from 'express';
+
+const app = express();
+
+app.get('/api/users', (req, res) => {
+  // Extract trace headers
+  const sentryTrace = req.headers['sentry-trace'];
+  const baggage = req.headers['baggage'];
+  
+  // Continue the trace
+  Sentry.continueTrace(
+    { sentryTrace, baggage },
+    () => {
+      Sentry.startSpan(
+        { name: 'GET /api/users', op: 'http.server' },
+        async () => {
+          const users = await fetchUsers();
+          res.json(users);
+        }
+      );
+    }
+  );
+});
+```
+
+### Client-Side
+
+Continue a trace from meta tags (for server-side rendered apps):
+
+```html
+<!-- Server renders these meta tags -->
+<meta name="sentry-trace" content="{{ trace_header }}">
+<meta name="baggage" content="{{ baggage_header }}">
+```
+
+```javascript
+import * as Sentry from '@sentry/browser';
+
+// Read meta tags
+const sentryTrace = document.querySelector('meta[name="sentry-trace"]')?.content;
+const baggage = document.querySelector('meta[name="baggage"]')?.content;
+
+if (sentryTrace && baggage) {
+  Sentry.continueTrace({ sentryTrace, baggage }, () => {
+    // Client-side operations are now part of the server trace
+    Sentry.startSpan({ name: 'page_load', op: 'pageload' }, () => {
+      // ...
+    });
+  });
+}
+```
+
+## Trace Headers
+
+### sentry-trace Header
+
+Format: `{trace_id}-{span_id}-{sampled}`
+
+```
+sentry-trace: 12345678901234567890123456789012-1234567890123456-1
+```
+
+- **trace_id**: 32-character hex string
+- **span_id**: 16-character hex string
+- **sampled**: `1` (sampled) or `0` (not sampled)
+
+### baggage Header
+
+Carries additional metadata:
+
+```
+baggage: sentry-trace_id=abc123,sentry-public_key=xyz,sentry-sample_rate=1.0
+```
+
+## Manual Propagation
+
+Manually add trace headers to requests:
+
+```javascript
+import { getActiveSpan, spanToTraceHeader, getDynamicSamplingContextFromSpan } from '@sentry/browser';
+
+const activeSpan = getActiveSpan();
+
+if (activeSpan) {
+  const headers = {};
+  
+  // Add sentry-trace header
+  headers['sentry-trace'] = spanToTraceHeader(activeSpan);
+  
+  // Add baggage header
+  const dsc = getDynamicSamplingContextFromSpan(activeSpan);
+  headers['baggage'] = dynamicSamplingContextToSentryBaggageHeader(dsc);
+  
+  // Make request with headers
+  fetch('https://api.example.com/data', { headers });
+}
+```
+
+## Cross-Service Example
+
+### Service A (Frontend)
+
+```javascript
+import * as Sentry from '@sentry/browser';
+
+Sentry.init({
+  dsn: 'your-dsn',
+  tracesSampleRate: 1.0,
+  tracePropagationTargets: ['localhost', 'api.example.com']
+});
+
+// User action starts a trace
+button.addEventListener('click', async () => {
+  await Sentry.startSpan(
+    { name: 'process_order', op: 'ui.action' },
+    async () => {
+      // Trace headers automatically added
+      const response = await fetch('http://localhost:3000/api/orders', {
+        method: 'POST',
+        body: JSON.stringify(orderData)
+      });
+      
+      return response.json();
+    }
+  );
+});
+```
+
+### Service B (Backend API)
+
+```javascript
+import * as Sentry from '@sentry/node';
+import express from 'express';
+
+Sentry.init({
+  dsn: 'your-dsn',
+  tracesSampleRate: 1.0,
+  tracePropagationTargets: ['localhost', 'payment.example.com']
+});
+
+const app = express();
+
+app.post('/api/orders', async (req, res) => {
+  // Continue trace from frontend
+  const sentryTrace = req.headers['sentry-trace'];
+  const baggage = req.headers['baggage'];
+  
+  await Sentry.continueTrace({ sentryTrace, baggage }, async () => {
+    await Sentry.startSpan(
+      { name: 'POST /api/orders', op: 'http.server' },
+      async () => {
+        // Save order
+        const order = await Sentry.startSpan(
+          { name: 'save_order', op: 'db.query' },
+          () => db.orders.create(req.body)
+        );
+        
+        // Call payment service (trace continues)
+        const payment = await Sentry.startSpan(
+          { name: 'process_payment', op: 'http.client' },
+          () => fetch('http://payment.example.com/charge', {
+            method: 'POST',
+            body: JSON.stringify({ orderId: order.id, amount: order.total })
+          })
+        );
+        
+        res.json({ success: true, orderId: order.id });
+      }
+    );
+  });
+});
+```
+
+### Service C (Payment Service)
+
+```javascript
+import * as Sentry from '@sentry/node';
+import express from 'express';
+
+Sentry.init({
+  dsn: 'your-dsn',
+  tracesSampleRate: 1.0
+});
+
+const app = express();
+
+app.post('/charge', async (req, res) => {
+  // Continue trace from backend API
+  const sentryTrace = req.headers['sentry-trace'];
+  const baggage = req.headers['baggage'];
+  
+  await Sentry.continueTrace({ sentryTrace, baggage }, async () => {
+    await Sentry.startSpan(
+      { name: 'POST /charge', op: 'http.server' },
+      async () => {
+        // Charge card
+        const result = await Sentry.startSpan(
+          { name: 'charge_card', op: 'payment.charge' },
+          () => stripeCharge(req.body)
+        );
+        
+        // Record transaction
+        await Sentry.startSpan(
+          { name: 'record_transaction', op: 'db.query' },
+          () => db.transactions.create(result)
+        );
+        
+        res.json({ success: true, transactionId: result.id });
+      }
+    );
+  });
+});
+```
+
+The result is a single trace showing:
+1. User click (Frontend)
+2. API request (Frontend → Backend)
+3. Save order (Backend)
+4. Payment request (Backend → Payment Service)
+5. Charge card (Payment Service)
+6. Record transaction (Payment Service)
+
+## Dynamic Sampling Context
+
+Dynamic Sampling Context (DSC) carries metadata for sampling decisions:
+
+```javascript
+import { getDynamicSamplingContextFromSpan } from '@sentry/browser';
+
+const activeSpan = getActiveSpan();
+const dsc = getDynamicSamplingContextFromSpan(activeSpan);
+
+console.log(dsc);
+// {
+//   trace_id: 'abc123...',
+//   public_key: 'xyz...',
+//   release: '1.0.0',
+//   environment: 'production',
+//   sample_rate: '1.0',
+//   transaction: 'GET /api/users'
+// }
+```
+
+## Sampling Considerations
+
+### Head-Based Sampling
+
+Sampling decision is made at the start of the trace:
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  tracesSampleRate: 0.1 // Sample 10% at the root
+});
+```
+
+All services must honor the sampling decision from the root:
+
+```javascript
+Sentry.continueTrace({ sentryTrace, baggage }, () => {
+  // Sampling decision is inherited from the parent trace
+});
+```
+
+### Per-Service Sampling
+
+Each service can make its own sampling decisions:
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  tracesSampler: (samplingContext) => {
+    // Respect parent sampling decision
+    if (samplingContext.parentSampled !== undefined) {
+      return samplingContext.parentSampled ? 1.0 : 0;
+    }
+    
+    // Make local decision
+    return 0.1;
+  }
+});
+```
+
+<Note>
+For consistent distributed traces, use head-based sampling (single decision at the root) rather than per-service sampling.
+</Note>
+
+## Debugging Distributed Traces
+
+### Check Trace Headers
+
+```javascript
+// Log outgoing headers
+const originalFetch = window.fetch;
+window.fetch = function(...args) {
+  const [url, options] = args;
+  console.log('Request to:', url);
+  console.log('Headers:', options?.headers);
+  return originalFetch.apply(this, args);
+};
+```
+
+### Verify Trace Continuity
+
+```javascript
+import { getActiveSpan, spanToJSON } from '@sentry/browser';
+
+const activeSpan = getActiveSpan();
+if (activeSpan) {
+  const spanData = spanToJSON(activeSpan);
+  console.log('Current Trace ID:', spanData.trace_id);
+  console.log('Current Span ID:', spanData.span_id);
+  console.log('Parent Span ID:', spanData.parent_span_id);
+}
+```
+
+## Best Practices
+
+1. **Configure trace propagation targets**: Only propagate to services you control
+2. **Use consistent DSNs**: Ensure all services send data to the same Sentry project (or linked projects)
+3. **Honor parent sampling**: Don't override the sampling decision from the root
+4. **Set meaningful operation names**: Use standard operation types (`http.server`, `http.client`, etc.)
+5. **Add service identifiers**: Tag spans with service names for easy filtering
+6. **Monitor trace completion**: Ensure all services successfully propagate trace context
+
+## Common Pitfalls
+
+### Missing Trace Headers
+
+```javascript
+// ❌ Bad: Custom fetch without trace headers
+fetch(url, {
+  headers: {
+    'Authorization': 'Bearer token'
+    // Missing trace headers!
+  }
+});
+
+// ✅ Good: Use instrumented fetch or add headers manually
+fetch(url, {
+  headers: {
+    'Authorization': 'Bearer token',
+    'sentry-trace': spanToTraceHeader(activeSpan),
+    'baggage': getBaggageHeader(activeSpan)
+  }
+});
+```
+
+### Incorrect Trace Continuation
+
+```javascript
+// ❌ Bad: Not continuing the trace
+app.get('/api/users', (req, res) => {
+  Sentry.startSpan({ name: 'GET /api/users' }, () => {
+    // This starts a NEW trace, not continuing the incoming one
+  });
+});
+
+// ✅ Good: Continue the incoming trace
+app.get('/api/users', (req, res) => {
+  Sentry.continueTrace(
+    {
+      sentryTrace: req.headers['sentry-trace'],
+      baggage: req.headers['baggage']
+    },
+    () => {
+      Sentry.startSpan({ name: 'GET /api/users' }, () => {
+        // Part of the incoming trace
+      });
+    }
+  );
+});
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Tracing" icon="route" href="/core/tracing">
+    Learn about traces and spans
+  </Card>
+  <Card title="Spans" icon="clock" href="/core/spans">
+    Work with individual spans
+  </Card>
+  <Card title="Performance" icon="gauge" href="/core/performance">
+    Performance monitoring overview
+  </Card>
+  <Card title="Session Replay" icon="video" href="/core/session-replay">
+    Combine traces with session replay
+  </Card>
+</CardGroup>

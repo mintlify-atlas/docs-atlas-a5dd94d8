@@ -1,0 +1,162 @@
+---
+title: "Introduction"
+description: "Official Sentry SDKs for JavaScript - Error monitoring, performance tracking, and user feedback across all JavaScript platforms"
+---
+
+<div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[#1b1530] to-[#252038] p-12 shadow-2xl border border-white/10">
+  <div className="relative z-10">
+    <h1 className="text-5xl font-bold text-white mb-4">
+      Sentry JavaScript SDK
+    </h1>
+    <p className="text-xl text-[#e1e1e6] mb-8 max-w-2xl">
+      Monitor errors, track performance, and improve user experience across all JavaScript platforms with Sentry's comprehensive SDK suite.
+    </p>
+    <div className="flex gap-4">
+      <a
+        href="/quickstart"
+        className="inline-flex items-center px-6 py-3 bg-white text-black font-semibold rounded-md hover:opacity-90 transition-opacity"
+      >
+        Get Started
+      </a>
+      <a
+        href="https://github.com/getsentry/sentry-javascript"
+        className="inline-flex items-center px-6 py-3 bg-transparent text-[#b588ed] font-semibold rounded-md border border-[#b588ed] hover:bg-[#b588ed]/10 transition-colors"
+      >
+        View on GitHub
+      </a>
+    </div>
+  </div>
+</div>
+
+## What is Sentry JavaScript SDK?
+
+Sentry JavaScript SDK is a comprehensive suite of error monitoring and performance tracking libraries for JavaScript applications. With over 40 platform-specific SDKs, Sentry provides deep integration with your JavaScript stack—from vanilla browser apps to full-stack frameworks like Next.js, SvelteKit, and Remix.
+
+### Key Features
+
+<CardGroup cols={2}>
+  <Card title="Error Monitoring" icon="bug" href="/core/error-monitoring">
+    Automatically capture and report JavaScript errors with full context including stack traces, breadcrumbs, and user data
+  </Card>
+  <Card title="Performance Tracking" icon="gauge-high" href="/core/performance">
+    Monitor application performance with distributed tracing, spans, and real-time metrics powered by OpenTelemetry
+  </Card>
+  <Card title="Session Replay" icon="video" href="/core/session-replay">
+    Replay user sessions to see exactly what happened before an error occurred, including DOM interactions and console logs
+  </Card>
+  <Card title="AI Monitoring" icon="brain" href="/integrations/ai/overview">
+    Track AI model performance and errors with built-in integrations for OpenAI, Anthropic, LangChain, and more
+  </Card>
+</CardGroup>
+
+## Supported Platforms
+
+Sentry provides first-class support for all major JavaScript environments and frameworks:
+
+<CardGroup cols={3}>
+  <Card title="Browser" icon="browser" href="/platforms/browser">
+    Vanilla JavaScript, TypeScript, and browser-based applications
+  </Card>
+  <Card title="Node.js" icon="node" href="/platforms/node">
+    Server-side JavaScript with full OpenTelemetry instrumentation
+  </Card>
+  <Card title="React" icon="react" href="/platforms/react">
+    Error boundaries, profiling, and React-specific integrations
+  </Card>
+  <Card title="Vue" icon="vuejs" href="/platforms/vue">
+    Vue 2 and Vue 3 with composition API support
+  </Card>
+  <Card title="Angular" icon="angular" href="/platforms/angular">
+    Error handling and tracing for Angular applications
+  </Card>
+  <Card title="Next.js" icon="js" href="/platforms/nextjs">
+    Full-stack monitoring for Next.js with server and client integration
+  </Card>
+  <Card title="SvelteKit" icon="js" href="/platforms/sveltekit">
+    Isomorphic error tracking for SvelteKit applications
+  </Card>
+  <Card title="Remix" icon="js" href="/platforms/remix">
+    Server and client monitoring for Remix applications
+  </Card>
+  <Card title="Serverless" icon="lambda" href="/platforms/aws-serverless">
+    AWS Lambda, Google Cloud Functions, and edge runtimes
+  </Card>
+</CardGroup>
+
+## Quick Example
+
+Here's how simple it is to get started with Sentry in a browser application:
+
+```typescript
+import * as Sentry from '@sentry/browser';
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  integrations: [
+    Sentry.browserTracingIntegration(),
+    Sentry.replayIntegration(),
+  ],
+  tracesSampleRate: 1.0,
+  replaysSessionSampleRate: 0.1,
+  replaysOnErrorSampleRate: 1.0,
+});
+
+// Errors are automatically captured
+try {
+  somethingThatMightFail();
+} catch (error) {
+  Sentry.captureException(error);
+}
+```
+
+<Note>
+  Each platform SDK is tailored to provide the best developer experience and deepest integration with your chosen framework.
+</Note>
+
+## Advanced Capabilities
+
+<CardGroup cols={2}>
+  <Card title="Profiling" icon="chart-line" href="/core/profiling">
+    CPU profiling for Node.js applications to identify performance bottlenecks
+  </Card>
+  <Card title="User Feedback" icon="comments" href="/core/user-feedback">
+    Collect user feedback directly from your application when errors occur
+  </Card>
+  <Card title="Feature Flags" icon="flag" href="/core/feature-flags">
+    Track feature flag usage and correlate with errors and performance issues
+  </Card>
+  <Card title="Custom Integrations" icon="puzzle-piece" href="/guides/advanced/custom-integrations">
+    Build custom integrations to extend Sentry's capabilities for your specific needs
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart Guide" icon="rocket" href="/quickstart">
+    Get up and running with Sentry in under 5 minutes
+  </Card>
+  <Card title="Choose Your Platform" icon="layer-group" href="/installation/browser">
+    Find installation instructions for your specific framework
+  </Card>
+  <Card title="Core Concepts" icon="book" href="/core/error-monitoring">
+    Learn about scopes, contexts, breadcrumbs, and more
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/core/client">
+    Explore the complete API documentation
+  </Card>
+</CardGroup>
+
+## Community & Support
+
+<CardGroup cols={3}>
+  <Card title="GitHub" icon="github" href="https://github.com/getsentry/sentry-javascript">
+    View source code and contribute
+  </Card>
+  <Card title="Discord" icon="discord" href="https://discord.gg/Ww9hbqr">
+    Join our community chat
+  </Card>
+  <Card title="Stack Overflow" icon="stack-overflow" href="https://stackoverflow.com/questions/tagged/sentry">
+    Get help from the community
+  </Card>
+</CardGroup>

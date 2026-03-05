@@ -1,0 +1,552 @@
+---
+title: "Spans"
+description: "Measure individual operations with spans in Sentry"
+---
+
+Spans are the building blocks of performance monitoring in Sentry. Each span represents a single operation or unit of work with a start and end time.
+
+## Span Basics
+
+A span contains:
+
+- **Span ID**: Unique identifier for the span
+- **Trace ID**: Identifier linking it to a trace
+- **Parent Span ID**: Links to parent span (if any)
+- **Operation**: Type of operation (e.g., `db.query`, `http.client`)
+- **Description/Name**: What the span measures
+- **Start/End Time**: When the span began and ended
+- **Status**: Success or failure indicator
+- **Attributes**: Custom key-value data
+
+```javascript
+import * as Sentry from '@sentry/browser';
+
+Sentry.startSpan(
+  {
+    name: 'database_query',
+    op: 'db.query'
+  },
+  (span) => {
+    // Span is automatically tracked
+    const result = queryDatabase();
+    return result;
+  }
+);
+```
+
+## Creating Spans
+
+### Auto-finishing Spans
+
+Spans that finish when the callback completes:
+
+```javascript
+Sentry.startSpan({ name: 'my_operation', op: 'function' }, (span) => {
+  doWork();
+  return result;
+  // Span ends here automatically
+});
+```
+
+### Manual Span Control
+
+Control span lifetime explicitly:
+
+```javascript
+import { startInactiveSpan } from '@sentry/browser';
+
+const span = startInactiveSpan({
+  name: 'manual_operation',
+  op: 'function'
+});
+
+try {
+  doWork();
+  span.setStatus({ code: 1 }); // OK
+} catch (error) {
+  span.setStatus({ code: 2, message: 'error' }); // Error
+  throw error;
+} finally {
+  span.end();
+}
+```
+
+### Async Operations
+
+Spans work seamlessly with async/await:
+
+```javascript
+await Sentry.startSpan(
+  { name: 'async_operation', op: 'http.client' },
+  async (span) => {
+    const response = await fetch('/api/data');
+    const data = await response.json();
+    
+    span.setAttribute('response.size', JSON.stringify(data).length);
+    
+    return data;
+  }
+);
+```
+
+## Span Hierarchy
+
+### Parent-Child Relationships
+
+Spans automatically form a hierarchy:
+
+```javascript
+Sentry.startSpan({ name: 'parent_operation' }, (parentSpan) => {
+  doWork();
+  
+  // Child span
+  Sentry.startSpan({ name: 'child_operation' }, (childSpan) => {
+    doChildWork();
+  });
+  
+  // Another child
+  Sentry.startSpan({ name: 'another_child' }, (childSpan) => {
+    doMoreWork();
+  });
+});
+```
+
+### Root Spans (Transactions)
+
+The top-level span in a trace is called a transaction:
+
+```javascript
+// This creates a root span (transaction)
+Sentry.startSpan(
+  {
+    name: 'checkout_flow',
+    op: 'transaction'
+  },
+  (transaction) => {
+    // Child spans
+    Sentry.startSpan({ name: 'validate_cart' }, () => {});
+    Sentry.startSpan({ name: 'process_payment' }, () => {});
+    Sentry.startSpan({ name: 'send_confirmation' }, () => {});
+  }
+);
+```
+
+<Note>
+Transactions are sent to Sentry when the root span finishes. Child spans are included in the transaction.
+</Note>
+
+## Span Attributes
+
+### Setting Attributes
+
+Add custom data to spans:
+
+```javascript
+Sentry.startSpan({ name: 'api_call', op: 'http.client' }, (span) => {
+  // Set individual attributes
+  span.setAttribute('http.method', 'POST');
+  span.setAttribute('http.url', 'https://api.example.com/users');
+  span.setAttribute('http.status_code', 201);
+  
+  // Set multiple attributes
+  span.setAttributes({
+    'user.id': '123',
+    'user.premium': true,
+    'request.body.size': 1024
+  });
+});
+```
+
+### Removing Attributes
+
+```javascript
+Sentry.startSpan({ name: 'operation' }, (span) => {
+  span.setAttribute('temp_data', 'value');
+  
+  // Remove attribute by setting to undefined
+  span.setAttribute('temp_data', undefined);
+});
+```
+
+### Standard Attributes
+
+Use semantic attributes for common data:
+
+```javascript
+// HTTP attributes
+span.setAttributes({
+  'http.method': 'GET',
+  'http.url': 'https://api.example.com/users',
+  'http.status_code': 200,
+  'http.request_content_length': 0,
+  'http.response_content_length': 1024
+});
+
+// Database attributes
+span.setAttributes({
+  'db.system': 'postgresql',
+  'db.name': 'users_db',
+  'db.statement': 'SELECT * FROM users WHERE id = $1',
+  'db.operation': 'SELECT'
+});
+
+// User attributes
+span.setAttributes({
+  'user.id': '123',
+  'user.email': 'user@example.com',
+  'user.role': 'admin'
+});
+```
+
+## Span Status
+
+Indicate whether a span succeeded or failed:
+
+```javascript
+import { SPAN_STATUS_OK, SPAN_STATUS_ERROR } from '@sentry/browser';
+
+Sentry.startSpan({ name: 'operation' }, (span) => {
+  try {
+    doWork();
+    span.setStatus({ code: SPAN_STATUS_OK });
+  } catch (error) {
+    span.setStatus({ code: SPAN_STATUS_ERROR, message: 'Operation failed' });
+    throw error;
+  }
+});
+```
+
+### Status Codes
+
+- `SPAN_STATUS_UNSET` (0): Default, no status set
+- `SPAN_STATUS_OK` (1): Operation completed successfully
+- `SPAN_STATUS_ERROR` (2): Operation failed
+
+### HTTP Status Codes
+
+Automatically set status from HTTP responses:
+
+```javascript
+import { setHttpStatus } from '@sentry/browser';
+
+Sentry.startSpan({ name: 'api_request' }, async (span) => {
+  const response = await fetch('/api/data');
+  
+  // Automatically sets span status based on HTTP code
+  setHttpStatus(span, response.status);
+  // 2xx -> OK, 4xx/5xx -> ERROR
+  
+  return response.json();
+});
+```
+
+## Span Events
+
+Add timestamped events within a span:
+
+```javascript
+Sentry.startSpan({ name: 'complex_operation' }, (span) => {
+  span.addEvent('started_validation');
+  validateInput();
+  
+  span.addEvent('validation_complete', {
+    'validation.errors': 0
+  });
+  
+  processData();
+  
+  span.addEvent('processing_complete', {
+    'records.processed': 100
+  });
+});
+```
+
+## Updating Span Names
+
+Change span names dynamically:
+
+```javascript
+Sentry.startSpan({ name: 'api_request' }, async (span) => {
+  const response = await fetch('/api/endpoint');
+  
+  // Update name based on response
+  span.updateName(`GET /api/endpoint [${response.status}]`);
+  
+  return response;
+});
+```
+
+<Tip>
+Use dynamic span names to categorize similar operations based on their outcome or parameters.
+</Tip>
+
+## Span Context
+
+Access span identifiers:
+
+```javascript
+Sentry.startSpan({ name: 'operation' }, (span) => {
+  const context = span.spanContext();
+  
+  console.log('Span ID:', context.spanId);
+  console.log('Trace ID:', context.traceId);
+  console.log('Trace Flags:', context.traceFlags);
+});
+```
+
+## Span Sampling
+
+Control whether a span is recorded:
+
+```javascript
+import { spanToJSON } from '@sentry/browser';
+
+Sentry.startSpan({ name: 'operation' }, (span) => {
+  const spanData = spanToJSON(span);
+  
+  // Check if span is being recorded
+  if (span.isRecording()) {
+    // Span is sampled and will be sent to Sentry
+    span.setAttribute('detailed_info', expensiveComputation());
+  }
+});
+```
+
+## Getting Span Data
+
+Retrieve span information:
+
+```javascript
+import { spanToJSON } from '@sentry/browser';
+
+Sentry.startSpan({ name: 'operation' }, (span) => {
+  // Get JSON representation
+  const spanData = spanToJSON(span);
+  
+  console.log('Span ID:', spanData.span_id);
+  console.log('Trace ID:', spanData.trace_id);
+  console.log('Parent Span ID:', spanData.parent_span_id);
+  console.log('Op:', spanData.op);
+  console.log('Description:', spanData.description);
+  console.log('Start Time:', spanData.start_timestamp);
+  console.log('Attributes:', spanData.data);
+});
+```
+
+## Span Links
+
+Link spans to other traces:
+
+```javascript
+import { startInactiveSpan } from '@sentry/browser';
+
+const span = startInactiveSpan({
+  name: 'operation_with_links'
+});
+
+// Add link to another trace
+span.addLink({
+  traceId: 'other-trace-id',
+  spanId: 'other-span-id',
+  attributes: {
+    'link.type': 'related_operation'
+  }
+});
+
+// Add multiple links
+span.addLinks([
+  { traceId: 'trace-1', spanId: 'span-1' },
+  { traceId: 'trace-2', spanId: 'span-2' }
+]);
+
+span.end();
+```
+
+<Note>
+Span links allow you to connect spans across different traces, useful for batch processing or fan-out operations.
+</Note>
+
+## Practical Examples
+
+### Database Query
+
+```javascript
+Sentry.startSpan(
+  {
+    name: 'SELECT users',
+    op: 'db.query',
+    attributes: {
+      'db.system': 'postgresql',
+      'db.name': 'production',
+      'db.statement': 'SELECT * FROM users WHERE active = true'
+    }
+  },
+  async (span) => {
+    const start = Date.now();
+    const users = await db.query('SELECT * FROM users WHERE active = true');
+    const duration = Date.now() - start;
+    
+    span.setAttribute('db.rows_affected', users.length);
+    span.setAttribute('db.duration_ms', duration);
+    
+    return users;
+  }
+);
+```
+
+### HTTP Request
+
+```javascript
+Sentry.startSpan(
+  {
+    name: 'GET /api/users',
+    op: 'http.client',
+    attributes: {
+      'http.method': 'GET',
+      'http.url': 'https://api.example.com/users'
+    }
+  },
+  async (span) => {
+    const startTime = performance.now();
+    
+    const response = await fetch('https://api.example.com/users', {
+      headers: {
+        'Authorization': 'Bearer token',
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    const duration = performance.now() - startTime;
+    
+    span.setAttributes({
+      'http.status_code': response.status,
+      'http.response_content_length': response.headers.get('content-length'),
+      'http.duration_ms': duration
+    });
+    
+    setHttpStatus(span, response.status);
+    
+    return response.json();
+  }
+);
+```
+
+### File Processing
+
+```javascript
+Sentry.startSpan(
+  {
+    name: 'process_file',
+    op: 'file.process',
+    attributes: {
+      'file.name': 'data.csv',
+      'file.type': 'text/csv'
+    }
+  },
+  (span) => {
+    // Read file
+    Sentry.startSpan({ name: 'read_file', op: 'file.read' }, () => {
+      const content = readFile('data.csv');
+      span.setAttribute('file.size', content.length);
+      return content;
+    });
+    
+    // Parse
+    const records = Sentry.startSpan(
+      { name: 'parse_csv', op: 'parse' },
+      () => parseCSV(content)
+    );
+    
+    span.setAttribute('records.count', records.length);
+    
+    // Process
+    const processed = Sentry.startSpan(
+      { name: 'process_records', op: 'function' },
+      () => records.map(processRecord)
+    );
+    
+    span.setAttribute('records.processed', processed.length);
+    
+    // Save
+    Sentry.startSpan(
+      { name: 'save_results', op: 'db.query' },
+      () => saveRecords(processed)
+    );
+  }
+);
+```
+
+### Caching Operation
+
+```javascript
+await Sentry.startSpan(
+  { name: 'get_user_data', op: 'cache.get' },
+  async (span) => {
+    // Try cache first
+    const cached = await Sentry.startSpan(
+      { name: 'check_cache', op: 'cache.get' },
+      () => cache.get('user:123')
+    );
+    
+    if (cached) {
+      span.setAttribute('cache.hit', true);
+      return cached;
+    }
+    
+    span.setAttribute('cache.hit', false);
+    
+    // Fetch from database
+    const userData = await Sentry.startSpan(
+      { name: 'query_user', op: 'db.query' },
+      () => db.users.findById('123')
+    );
+    
+    // Update cache
+    await Sentry.startSpan(
+      { name: 'set_cache', op: 'cache.set' },
+      () => cache.set('user:123', userData, { ttl: 3600 })
+    );
+    
+    return userData;
+  }
+);
+```
+
+## Span Best Practices
+
+1. **Use descriptive names**: Clearly indicate what the span measures
+2. **Set appropriate operations**: Use standard operation types
+3. **Add relevant attributes**: Include data that helps identify slow operations
+4. **Set status correctly**: Indicate success or failure
+5. **Keep spans focused**: Each span should represent one logical operation
+6. **Don't create too many spans**: Balance detail with overhead
+7. **Finish spans promptly**: Don't leave spans open
+
+## Span Limits
+
+Be aware of limits:
+
+- Maximum 1000 spans per transaction
+- Attribute values are truncated if too large
+- Deeply nested spans may impact performance
+
+<Warning>
+Transactions with more than 1000 spans will have spans dropped. Keep your span count reasonable.
+</Warning>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Tracing" icon="route" href="/core/tracing">
+    Learn about traces and span relationships
+  </Card>
+  <Card title="Distributed Tracing" icon="network-wired" href="/core/distributed-tracing">
+    Track spans across services
+  </Card>
+  <Card title="Performance" icon="gauge" href="/core/performance">
+    Performance monitoring overview
+  </Card>
+  <Card title="Profiling" icon="chart-line" href="/core/profiling">
+    CPU profiling for code-level insights
+  </Card>
+</CardGroup>

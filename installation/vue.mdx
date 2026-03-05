@@ -1,0 +1,583 @@
+---
+title: 'Vue.js Installation'
+description: 'Install and configure the Sentry SDK for Vue.js applications'
+---
+
+The `@sentry/vue` package provides error tracking and performance monitoring for Vue.js applications. It supports both Vue 2.x and Vue 3.x.
+
+## Prerequisites
+
+- Node.js 18 or newer
+- Vue.js 2.x or 3.x
+- A Sentry account and project DSN
+
+## Installation
+
+<Steps>
+  <Step title="Install the Package">
+    Install `@sentry/vue` using your preferred package manager:
+
+    <CodeGroup>
+    ```bash npm
+    npm install @sentry/vue
+    ```
+
+    ```bash yarn
+    yarn add @sentry/vue
+    ```
+
+    ```bash pnpm
+    pnpm add @sentry/vue
+    ```
+    </CodeGroup>
+
+    **Current Version:** 10.42.0
+  </Step>
+
+  <Step title="Initialize Sentry for Vue 3">
+    Initialize Sentry as early as possible in your application:
+
+    ```javascript
+    import { createApp } from 'vue';
+    import { createRouter } from 'vue-router';
+    import * as Sentry from '@sentry/vue';
+import App from './App.vue';
+
+    const app = createApp(App);
+    const router = createRouter({
+      // ... your router config
+    });
+
+    Sentry.init({
+      app,
+      dsn: 'YOUR_DSN_HERE',
+      
+      integrations: [
+        Sentry.browserTracingIntegration({ router }),
+        Sentry.replayIntegration(),
+      ],
+      
+      // Tracing
+      tracesSampleRate: 1.0,
+      tracePropagationTargets: ['localhost', /^https:\/\/yourserver\.io\/api/],
+      
+      // Session Replay
+      replaysSessionSampleRate: 0.1,
+      replaysOnErrorSampleRate: 1.0,
+    });
+
+    app.use(router);
+    app.mount('#app');
+    ```
+
+    <Note>
+      Pass your Vue app instance to `Sentry.init()` to enable automatic component tracking and Vue-specific error handling.
+    </Note>
+  </Step>
+
+  <Step title="Initialize Sentry for Vue 2">
+    For Vue 2 applications, pass the Vue constructor instead:
+
+    ```javascript
+    import Vue from 'vue';
+    import VueRouter from 'vue-router';
+    import * as Sentry from '@sentry/vue';
+    import App from './App.vue';
+
+    const router = new VueRouter({
+      // ... your router config
+    });
+
+    Sentry.init({
+      Vue,
+      dsn: 'YOUR_DSN_HERE',
+      
+      integrations: [
+        Sentry.browserTracingIntegration({ router }),
+      ],
+      
+      tracesSampleRate: 1.0,
+    });
+
+    new Vue({
+      router,
+      render: h => h(App),
+    }).$mount('#app');
+    ```
+  </Step>
+
+  <Step title="Verify Installation">
+    Test that Sentry is working:
+
+    ```javascript
+    Sentry.captureException(new Error('Test error'));
+    ```
+
+    Check your Sentry dashboard to see the error.
+  </Step>
+</Steps>
+
+## Vue Router Integration
+
+### With Vue Router
+
+For automatic page load and navigation tracking:
+
+```javascript
+import { createApp } from 'vue';
+import { createRouter } from 'vue-router';
+import * as Sentry from '@sentry/vue';
+
+const router = createRouter({
+  history: createWebHistory(),
+  routes: [
+    { path: '/', component: Home },
+    { path: '/about', component: About },
+  ],
+});
+
+Sentry.init({
+  app,
+  dsn: 'YOUR_DSN_HERE',
+  
+  integrations: [
+    // Pass the router instance for automatic navigation tracking
+    Sentry.browserTracingIntegration({ router }),
+  ],
+  
+  tracesSampleRate: 1.0,
+});
+```
+
+### Without Vue Router
+
+If you're not using Vue Router, omit the `router` option:
+
+```javascript
+Sentry.init({
+  app,
+  dsn: 'YOUR_DSN_HERE',
+  
+  integrations: [
+    Sentry.browserTracingIntegration(),
+  ],
+  
+  tracesSampleRate: 1.0,
+});
+```
+
+## TanStack Router Integration
+
+If you use TanStack Router for Vue instead of Vue Router:
+
+```javascript
+import { createApp } from 'vue';
+import { createRouter } from '@tanstack/vue-router';
+import * as Sentry from '@sentry/vue';
+import { tanstackRouterBrowserTracingIntegration } from '@sentry/vue/tanstackrouter';
+
+const router = createRouter({
+  // your router config
+});
+
+Sentry.init({
+  app,
+  dsn: 'YOUR_DSN_HERE',
+  
+  integrations: [
+    tanstackRouterBrowserTracingIntegration(router),
+  ],
+  
+  tracesSampleRate: 1.0,
+});
+```
+
+<Note>
+  The TanStack Router integration is exported from `@sentry/vue/tanstackrouter`.
+</Note>
+
+## Error Tracking
+
+### Automatic Error Capture
+
+The SDK automatically captures:
+- Errors thrown in component lifecycle hooks
+- Errors in event handlers
+- Errors in watchers
+- Errors in render functions
+
+### Manual Error Capture
+
+```javascript
+import * as Sentry from '@sentry/vue';
+
+export default {
+  methods: {
+    async fetchData() {
+      try {
+        const response = await fetch('/api/data');
+        return response.json();
+      } catch (error) {
+        Sentry.captureException(error);
+        throw error;
+      }
+    },
+  },
+};
+```
+
+### In Composition API
+
+```javascript
+import { ref, onMounted } from 'vue';
+import * as Sentry from '@sentry/vue';
+
+export default {
+  setup() {
+    const data = ref(null);
+    
+    onMounted(async () => {
+      try {
+        const response = await fetch('/api/data');
+        data.value = await response.json();
+      } catch (error) {
+        Sentry.captureException(error);
+      }
+    });
+    
+    return { data };
+  },
+};
+```
+
+## Setting Context
+
+### User Context
+
+```javascript
+import * as Sentry from '@sentry/vue';
+
+export default {
+  mounted() {
+    // Set user information
+    Sentry.setUser({
+      id: this.$store.state.user.id,
+      email: this.$store.state.user.email,
+      username: this.$store.state.user.username,
+    });
+  },
+};
+```
+
+### Tags and Context
+
+```javascript
+import * as Sentry from '@sentry/vue';
+
+export default {
+  mounted() {
+    // Set tags
+    Sentry.setTag('page', this.$route.name);
+    Sentry.setTag('locale', this.$i18n.locale);
+    
+    // Set extra context
+    Sentry.setExtra('routeParams', this.$route.params);
+    Sentry.setContext('app_state', {
+      authenticated: this.$store.state.isAuthenticated,
+      theme: this.$store.state.theme,
+    });
+  },
+};
+```
+
+### Breadcrumbs
+
+```javascript
+import * as Sentry from '@sentry/vue';
+
+export default {
+  methods: {
+    handleClick() {
+      Sentry.addBreadcrumb({
+        category: 'ui.click',
+        message: 'User clicked submit button',
+        level: 'info',
+        data: {
+          buttonId: 'submit',
+        },
+      });
+      
+      this.submitForm();
+    },
+  },
+};
+```
+
+## Performance Monitoring
+
+### Component Tracking
+
+Sentry automatically tracks Vue component lifecycle performance when you pass the `app` instance:
+
+```javascript
+Sentry.init({
+  app,
+  dsn: 'YOUR_DSN_HERE',
+  
+  integrations: [
+    Sentry.browserTracingIntegration(),
+  ],
+  
+  tracesSampleRate: 1.0,
+  
+  // Track component lifecycle performance
+  trackComponents: true,
+});
+```
+
+### Custom Spans
+
+```javascript
+import * as Sentry from '@sentry/vue';
+
+export default {
+  methods: {
+    async loadData() {
+      const data = await Sentry.startSpan(
+        { 
+          name: 'fetch-user-data',
+          op: 'http.client',
+        },
+        async () => {
+          const response = await fetch('/api/user');
+          return response.json();
+        }
+      );
+      
+      return data;
+    },
+  },
+};
+```
+
+## Pinia Integration
+
+Track Pinia store actions:
+
+```javascript
+import { createPinia } from 'pinia';
+import * as Sentry from '@sentry/vue';
+
+const pinia = createPinia();
+
+pinia.use(({ store }) => {
+  store.$onAction(({ name, args, after, onError }) => {
+    // Add breadcrumb for each action
+    Sentry.addBreadcrumb({
+      category: 'pinia.action',
+      message: `${store.$id}.${name}`,
+      data: { args },
+    });
+    
+    // Capture errors in actions
+    onError((error) => {
+      Sentry.captureException(error, {
+        contexts: {
+          pinia: {
+            storeId: store.$id,
+            action: name,
+            args,
+          },
+        },
+      });
+    });
+  });
+});
+```
+
+## Session Replay
+
+Capture session replays to see what users experienced:
+
+```javascript
+import * as Sentry from '@sentry/vue';
+
+Sentry.init({
+  app,
+  dsn: 'YOUR_DSN_HERE',
+  
+  integrations: [
+    Sentry.replayIntegration({
+      maskAllText: true,
+      blockAllMedia: true,
+    }),
+  ],
+  
+  replaysSessionSampleRate: 0.1,
+  replaysOnErrorSampleRate: 1.0,
+});
+```
+
+### Privacy Controls
+
+```javascript
+Sentry.replayIntegration({
+  // Mask all text
+  maskAllText: true,
+  
+  // Block all media
+  blockAllMedia: true,
+  
+  // Mask specific elements
+  mask: ['.sensitive', '.password-field'],
+  
+  // Block specific elements
+  block: ['.ads', '.third-party'],
+})
+```
+
+## Advanced Configuration
+
+### TypeScript Support
+
+The SDK includes TypeScript definitions:
+
+```typescript
+import { createApp } from 'vue';
+import * as Sentry from '@sentry/vue';
+import type { BrowserOptions } from '@sentry/vue';
+
+const app = createApp(App);
+
+const sentryOptions: BrowserOptions = {
+  app,
+  dsn: 'YOUR_DSN_HERE',
+  tracesSampleRate: 1.0,
+};
+
+Sentry.init(sentryOptions);
+```
+
+### Custom Error Handler
+
+If you have a custom error handler, make sure Sentry is initialized first:
+
+```javascript
+import { createApp } from 'vue';
+import * as Sentry from '@sentry/vue';
+
+const app = createApp(App);
+
+Sentry.init({
+  app,
+  dsn: 'YOUR_DSN_HERE',
+});
+
+// Add custom error handler after Sentry init
+app.config.errorHandler = (err, instance, info) => {
+  // Custom handling
+  console.error('Custom error handler:', err);
+  
+  // Sentry will still capture the error
+};
+```
+
+### Filtering Components
+
+Control which components are tracked:
+
+```javascript
+Sentry.init({
+  app,
+  dsn: 'YOUR_DSN_HERE',
+  
+  trackComponents: true,
+  
+  hooks: ['create', 'mount', 'update'],
+  
+  // Don't track specific components
+  tracingOptions: {
+    trackComponents: true,
+    hooks: ['mount', 'update'],
+    timeout: 2000,
+  },
+});
+```
+
+## Troubleshooting
+
+### Source Maps
+
+For Vite projects:
+
+```javascript
+// vite.config.js
+import { defineConfig } from 'vite';
+import vue from '@vitejs/plugin-vue';
+import { sentryVitePlugin } from '@sentry/vite-plugin';
+
+export default defineConfig({
+  plugins: [
+    vue(),
+    sentryVitePlugin({
+      authToken: process.env.SENTRY_AUTH_TOKEN,
+      org: 'your-org',
+      project: 'your-project',
+    }),
+  ],
+  build: {
+    sourcemap: true,
+  },
+});
+```
+
+For Vue CLI / Webpack:
+
+```javascript
+// vue.config.js
+const { sentryWebpackPlugin } = require('@sentry/webpack-plugin');
+
+module.exports = {
+  configureWebpack: {
+    devtool: 'source-map',
+    plugins: [
+      sentryWebpackPlugin({
+        authToken: process.env.SENTRY_AUTH_TOKEN,
+        org: 'your-org',
+        project: 'your-project',
+      }),
+    ],
+  },
+};
+```
+
+### Errors Not Being Captured
+
+Make sure:
+1. `Sentry.init()` is called before creating the Vue app
+2. You passed the `app` instance (Vue 3) or `Vue` constructor (Vue 2)
+3. The error is not caught by a `try/catch` without re-throwing
+
+<Warning>
+  For Vue 3, you must pass the `app` instance to `Sentry.init()`. For Vue 2, pass the `Vue` constructor.
+</Warning>
+
+### Performance Not Tracked
+
+Ensure:
+1. `tracesSampleRate` is set to a value greater than 0
+2. The router is passed to `browserTracingIntegration`
+3. You're using a supported router (Vue Router or TanStack Router)
+
+## Next Steps
+
+- Configure [Vue Router Integration](/essentials/vue-router)
+- Set up [Pinia Integration](/essentials/pinia-integration)
+- Learn about [Session Replay](/essentials/session-replay)
+- Explore [Performance Monitoring](/essentials/performance-monitoring)
+
+## Related Documentation
+
+- [Official Vue SDK Docs](https://docs.sentry.io/platforms/javascript/guides/vue/)
+- [Sentry Vue Package on npm](https://www.npmjs.com/package/@sentry/vue)
+- [Source Code on GitHub](https://github.com/getsentry/sentry-javascript/tree/master/packages/vue)

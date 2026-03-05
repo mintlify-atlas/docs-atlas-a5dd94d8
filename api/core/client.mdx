@@ -1,0 +1,327 @@
+---
+title: "Client"
+description: "Base implementation for all JavaScript SDK clients"
+---
+
+The `Client` class is the base implementation for all JavaScript SDK clients. It handles event capture, transport, integrations, and lifecycle management.
+
+## Overview
+
+The Client is responsible for:
+- Capturing exceptions, messages, and events
+- Managing integrations and event processors
+- Sending data to Sentry via transports
+- Managing scope and session data
+
+## Class Definition
+
+```typescript
+export abstract class Client<O extends ClientOptions = ClientOptions> {
+  protected readonly _options: O;
+  protected readonly _dsn?: DsnComponents;
+  protected readonly _transport?: Transport;
+  protected _integrations: IntegrationIndex;
+  protected _numProcessing: number;
+  protected _eventProcessors: EventProcessor[];
+  protected _outcomes: { [key: string]: number };
+  protected _hooks: Record<string, Set<Function>>;
+  protected _promiseBuffer: PromiseBuffer<unknown>;
+
+  protected constructor(options: O);
+}
+```
+
+## Constructor
+
+<ParamField path="options" type="ClientOptions" required>
+  Configuration options for the client. See [Configuration Options](/api/configuration/options) for details.
+</ParamField>
+
+## Methods
+
+### captureException
+
+Captures an exception event and sends it to Sentry.
+
+```typescript
+public captureException(
+  exception: unknown,
+  hint?: EventHint,
+  scope?: Scope
+): string
+```
+
+<ParamField path="exception" type="unknown" required>
+  The exception to capture. Can be an Error object or any value.
+</ParamField>
+
+<ParamField path="hint" type="EventHint">
+  Additional information about the exception context.
+</ParamField>
+
+<ParamField path="scope" type="Scope">
+  The scope containing event metadata. If not provided, uses the current scope.
+</ParamField>
+
+**Returns:** `string` - The event ID of the captured exception.
+
+**Example:**
+
+```typescript
+const client = new NodeClient(options);
+const eventId = client.captureException(new Error('Something went wrong'), {
+  originalException: error,
+  data: { userId: '123' }
+}, scope);
+```
+
+### captureMessage
+
+Captures a message event and sends it to Sentry.
+
+```typescript
+public captureMessage(
+  message: ParameterizedString,
+  level?: SeverityLevel,
+  hint?: EventHint,
+  currentScope?: Scope
+): string
+```
+
+<ParamField path="message" type="ParameterizedString | string" required>
+  The message to capture.
+</ParamField>
+
+<ParamField path="level" type="SeverityLevel">
+  The severity level: `'fatal'`, `'error'`, `'warning'`, `'info'`, or `'debug'`.
+</ParamField>
+
+<ParamField path="hint" type="EventHint">
+  Additional information about the message context.
+</ParamField>
+
+<ParamField path="currentScope" type="Scope">
+  The scope containing event metadata.
+</ParamField>
+
+**Returns:** `string` - The event ID of the captured message.
+
+**Example:**
+
+```typescript
+const eventId = client.captureMessage(
+  'User login failed',
+  'warning',
+  { data: { username: 'john' } }
+);
+```
+
+### captureEvent
+
+Captures a manually created event and sends it to Sentry.
+
+```typescript
+public captureEvent(
+  event: Event,
+  hint?: EventHint,
+  currentScope?: Scope
+): string
+```
+
+<ParamField path="event" type="Event" required>
+  The event object to send. See [Event Types](/api/types/event) for structure.
+</ParamField>
+
+<ParamField path="hint" type="EventHint">
+  Additional metadata about the event.
+</ParamField>
+
+<ParamField path="currentScope" type="Scope">
+  The scope containing event metadata.
+</ParamField>
+
+**Returns:** `string` - The event ID.
+
+### flush
+
+Wait for all events to be sent or the timeout to expire.
+
+```typescript
+public async flush(timeout?: number): Promise<boolean>
+```
+
+<ParamField path="timeout" type="number">
+  Maximum time in milliseconds to wait. Omitting this will wait until all events are sent.
+</ParamField>
+
+**Returns:** `Promise<boolean>` - `true` if all events are sent before timeout, `false` otherwise.
+
+**Example:**
+
+```typescript
+// Flush with 5 second timeout
+const success = await client.flush(5000);
+if (!success) {
+  console.warn('Some events were not sent');
+}
+```
+
+### close
+
+Flush the event queue and disable the client.
+
+```typescript
+public async close(timeout?: number): Promise<boolean>
+```
+
+<ParamField path="timeout" type="number">
+  Maximum time in milliseconds to wait before shutting down.
+</ParamField>
+
+**Returns:** `Promise<boolean>` - `true` if flush completes successfully, `false` otherwise.
+
+**Example:**
+
+```typescript
+// Clean shutdown
+await client.close(2000);
+```
+
+### getDsn
+
+Get the current DSN.
+
+```typescript
+public getDsn(): DsnComponents | undefined
+```
+
+**Returns:** The parsed DSN components or `undefined` if no DSN is configured.
+
+### getOptions
+
+Get the client options.
+
+```typescript
+public getOptions(): O
+```
+
+**Returns:** The options passed to the client constructor.
+
+### getTransport
+
+Get the transport used by the client.
+
+```typescript
+public getTransport(): Transport | undefined
+```
+
+**Returns:** The transport instance or `undefined` if not initialized.
+
+### addIntegration
+
+Add an integration to the client at runtime.
+
+```typescript
+public addIntegration(integration: Integration): void
+```
+
+<ParamField path="integration" type="Integration" required>
+  The integration to add.
+</ParamField>
+
+**Example:**
+
+```typescript
+import { httpIntegration } from '@sentry/node';
+
+client.addIntegration(httpIntegration());
+```
+
+### getIntegrationByName
+
+Get an installed integration by name.
+
+```typescript
+public getIntegrationByName<T extends Integration = Integration>(
+  integrationName: string
+): T | undefined
+```
+
+<ParamField path="integrationName" type="string" required>
+  The name of the integration.
+</ParamField>
+
+**Returns:** The integration instance or `undefined`.
+
+### addEventProcessor
+
+Add an event processor that applies to all events.
+
+```typescript
+public addEventProcessor(eventProcessor: EventProcessor): void
+```
+
+<ParamField path="eventProcessor" type="EventProcessor" required>
+  A function that processes events before they are sent.
+</ParamField>
+
+**Example:**
+
+```typescript
+client.addEventProcessor((event, hint) => {
+  // Modify event before sending
+  event.tags = { ...event.tags, processed: 'true' };
+  return event;
+});
+```
+
+### on
+
+Register a callback for lifecycle hooks.
+
+```typescript
+public on(
+  hook: 'spanStart' | 'spanEnd' | 'beforeSendEvent' | 'flush' | ...,
+  callback: Function
+): () => void
+```
+
+**Returns:** A function that removes the registered callback.
+
+**Example:**
+
+```typescript
+const unsubscribe = client.on('spanStart', (span) => {
+  console.log('Span started:', span.spanContext().spanId);
+});
+
+// Later, remove the callback
+unsubscribe();
+```
+
+### emit
+
+Emit a hook event.
+
+```typescript
+public emit(hook: string, ...args: unknown[]): void
+```
+
+## Hooks
+
+The Client supports various lifecycle hooks:
+
+- `spanStart` - Fired when a span starts
+- `spanEnd` - Fired when a span ends
+- `beforeSendEvent` - Fired before sending an event
+- `afterSendEvent` - Fired after sending an event
+- `beforeAddBreadcrumb` - Fired before adding a breadcrumb
+- `flush` - Fired when flushing
+- `close` - Fired when closing
+
+## Related
+
+- [Configuration Options](/api/configuration/options)
+- [Transport](/api/core/transport)
+- [Scope](/api/core/scope)
+- [Integrations](/api/core/integrations)

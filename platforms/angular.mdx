@@ -1,0 +1,572 @@
+---
+title: Angular SDK
+description: Error monitoring and performance tracking for Angular applications
+---
+
+The Sentry Angular SDK provides comprehensive error monitoring and performance tracking for Angular applications (Angular 14-20).
+
+## Installation
+
+<CodeGroup>
+```bash npm
+npm install @sentry/angular
+```
+
+```bash yarn
+yarn add @sentry/angular
+```
+
+```bash pnpm
+pnpm add @sentry/angular
+```
+</CodeGroup>
+
+## Version Compatibility
+
+- Angular 14+ is fully supported
+- Angular 10-13: Use SDK version 7.x
+- Angular versions below 10: Not supported
+
+## Basic Setup
+
+<Tabs>
+  <Tab title="Standalone (Angular 14+)">
+    Initialize Sentry before bootstrapping your application:
+
+    ```typescript
+    // main.ts
+    import { bootstrapApplication } from '@angular/platform-browser';
+    import { init } from '@sentry/angular';
+    import { AppComponent } from './app/app.component';
+
+    init({
+      dsn: 'YOUR_DSN_HERE',
+      
+      integrations: [
+        // No additional setup needed for Angular
+      ],
+      
+      tracesSampleRate: 1.0,
+    });
+
+    bootstrapApplication(AppComponent, appConfig);
+    ```
+  </Tab>
+
+  <Tab title="NgModule (Legacy)">
+    Initialize in your main.ts:
+
+    ```typescript
+    // main.ts
+    import { enableProdMode } from '@angular/core';
+    import { platformBrowserDynamic } from '@angular/platform-browser-dynamic';
+    import { init } from '@sentry/angular';
+    import { AppModule } from './app/app.module';
+
+    init({
+      dsn: 'YOUR_DSN_HERE',
+      tracesSampleRate: 1.0,
+    });
+
+    platformBrowserDynamic()
+      .bootstrapModule(AppModule)
+      .catch(err => console.error(err));
+    ```
+  </Tab>
+</Tabs>
+
+## ErrorHandler Integration
+
+Register Sentry's ErrorHandler to capture Angular errors:
+
+<Tabs>
+  <Tab title="Standalone (Angular 14+)">
+    ```typescript
+    // app.config.ts
+    import { ApplicationConfig, ErrorHandler } from '@angular/core';
+    import { createErrorHandler } from '@sentry/angular';
+
+    export const appConfig: ApplicationConfig = {
+      providers: [
+        {
+          provide: ErrorHandler,
+          useValue: createErrorHandler({
+            showDialog: true,
+            logErrors: true,
+          }),
+        },
+        // ... other providers
+      ],
+    };
+    ```
+  </Tab>
+
+  <Tab title="NgModule (Legacy)">
+    ```typescript
+    // app.module.ts
+    import { NgModule, ErrorHandler } from '@angular/core';
+    import { createErrorHandler } from '@sentry/angular';
+
+    @NgModule({
+      // ...
+      providers: [
+        {
+          provide: ErrorHandler,
+          useValue: createErrorHandler({
+            showDialog: true,
+            logErrors: true,
+          }),
+        },
+      ],
+    })
+    export class AppModule {}
+    ```
+  </Tab>
+</Tabs>
+
+## Performance Monitoring
+
+### TraceService Setup
+
+Enable automatic route change tracking:
+
+<Tabs>
+  <Tab title="Angular 19+ (provideAppInitializer)">
+    ```typescript
+    // app.config.ts
+    import { ApplicationConfig, provideAppInitializer, inject } from '@angular/core';
+    import { TraceService } from '@sentry/angular';
+
+    export const appConfig: ApplicationConfig = {
+      providers: [
+        provideAppInitializer(() => {
+          inject(TraceService);
+        }),
+        // ... other providers
+      ],
+    };
+    ```
+  </Tab>
+
+  <Tab title="Angular 14-18 (APP_INITIALIZER)">
+    ```typescript
+    // app.config.ts
+    import { ApplicationConfig, APP_INITIALIZER } from '@angular/core';
+    import { TraceService } from '@sentry/angular';
+
+    export const appConfig: ApplicationConfig = {
+      providers: [
+        {
+          provide: APP_INITIALIZER,
+          useFactory: () => () => {},
+          deps: [TraceService],
+          multi: true,
+        },
+      ],
+    };
+    ```
+  </Tab>
+
+  <Tab title="NgModule (Legacy)">
+    ```typescript
+    // app.module.ts
+    import { NgModule, APP_INITIALIZER } from '@angular/core';
+    import { TraceService } from '@sentry/angular';
+
+    @NgModule({
+      providers: [
+        {
+          provide: APP_INITIALIZER,
+          useFactory: () => () => {},
+          deps: [TraceService],
+          multi: true,
+        },
+      ],
+    })
+    export class AppModule {}
+    ```
+  </Tab>
+</Tabs>
+
+### Initialize Browser Tracing
+
+```typescript
+import { init, browserTracingIntegration } from '@sentry/angular';
+
+init({
+  dsn: 'YOUR_DSN_HERE',
+  
+  integrations: [
+    browserTracingIntegration(),
+  ],
+  
+  // Set tracesSampleRate to 1.0 to capture 100%
+  // of transactions for performance monitoring.
+  tracesSampleRate: 1.0,
+  
+  // Propagate traces to these targets
+  tracePropagationTargets: ['localhost', 'https://yourserver.io/api'],
+});
+```
+
+## Component Tracking
+
+Track component performance with decorators and directives:
+
+<Tabs>
+  <Tab title="TraceDirective">
+    Track component initialization in templates:
+
+    ```typescript
+    // component.ts
+    import { Component } from '@angular/core';
+    import { TraceModule } from '@sentry/angular';
+
+    @Component({
+      selector: 'app-dashboard',
+      standalone: true,
+      imports: [TraceModule],
+      template: `
+        <app-header trace="header"></app-header>
+        <app-content trace="content"></app-content>
+        <app-footer trace="footer"></app-footer>
+      `,
+    })
+    export class DashboardComponent {}
+    ```
+
+    This tracks the duration between `OnInit` and `AfterViewInit` lifecycle hooks.
+  </Tab>
+
+  <Tab title="TraceClass Decorator">
+    Track component lifecycle at the class level:
+
+    ```typescript
+    import { Component } from '@angular/core';
+    import { TraceClass } from '@sentry/angular';
+
+    @Component({
+      selector: 'app-header',
+      templateUrl: './header.component.html',
+    })
+    @TraceClass()
+    export class HeaderComponent {
+      // Component logic
+    }
+    ```
+
+    Automatically tracks `OnInit` to `AfterViewInit` duration.
+  </Tab>
+
+  <Tab title="TraceMethod Decorator">
+    Track specific lifecycle methods:
+
+    ```typescript
+    import { Component, OnInit } from '@angular/core';
+    import { TraceMethod } from '@sentry/angular';
+
+    @Component({
+      selector: 'app-footer',
+      templateUrl: './footer.component.html',
+    })
+    export class FooterComponent implements OnInit {
+      @TraceMethod()
+      ngOnInit() {
+        // Initialization logic
+      }
+      
+      @TraceMethod({ name: 'custom-method' })
+      async loadData() {
+        // This method will be tracked
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Custom Performance Tracking
+
+### Track Bootstrap Process
+
+```typescript
+import { enableProdMode } from '@angular/core';
+import { platformBrowserDynamic } from '@angular/platform-browser-dynamic';
+import { init, startSpan } from '@sentry/angular';
+import { AppModule } from './app/app.module';
+
+init({
+  dsn: 'YOUR_DSN_HERE',
+  tracesSampleRate: 1.0,
+});
+
+startSpan(
+  {
+    name: 'platform-browser-dynamic',
+    op: 'ui.angular.bootstrap',
+  },
+  async () => {
+    await platformBrowserDynamic().bootstrapModule(AppModule);
+  },
+);
+```
+
+### Track Service Methods
+
+```typescript
+import { Injectable } from '@angular/core';
+import * as Sentry from '@sentry/angular';
+
+@Injectable({
+  providedIn: 'root',
+})
+export class DataService {
+  async fetchData() {
+    return await Sentry.startSpan(
+      {
+        name: 'DataService.fetchData',
+        op: 'http.client',
+      },
+      async () => {
+        const response = await fetch('/api/data');
+        return response.json();
+      },
+    );
+  }
+}
+```
+
+## Error Handling
+
+### Manual Error Capture
+
+```typescript
+import { Component } from '@angular/core';
+import * as Sentry from '@sentry/angular';
+
+@Component({
+  selector: 'app-user-profile',
+  templateUrl: './user-profile.component.html',
+})
+export class UserProfileComponent {
+  async saveProfile() {
+    try {
+      await this.userService.save(this.profile);
+    } catch (error) {
+      Sentry.captureException(error, {
+        tags: {
+          component: 'UserProfile',
+          action: 'save',
+        },
+      });
+    }
+  }
+}
+```
+
+### ErrorHandler Options
+
+```typescript
+import { createErrorHandler } from '@sentry/angular';
+
+const errorHandler = createErrorHandler({
+  // Show user feedback dialog
+  showDialog: true,
+  
+  // Log errors to console
+  logErrors: true,
+  
+  // Customize dialog options
+  dialogOptions: {
+    title: 'It looks like we\'re having issues.',
+    subtitle: 'Our team has been notified.',
+  },
+});
+```
+
+## HTTP Interceptor
+
+Track HTTP requests:
+
+```typescript
+import { ApplicationConfig, provideHttpClient, withInterceptors } from '@angular/core';
+import { httpClientIntegration } from '@sentry/angular';
+
+init({
+  dsn: 'YOUR_DSN_HERE',
+  integrations: [
+    httpClientIntegration(),
+  ],
+});
+```
+
+## Context & User Information
+
+```typescript
+import { Injectable } from '@angular/core';
+import * as Sentry from '@sentry/angular';
+
+@Injectable({
+  providedIn: 'root',
+})
+export class AuthService {
+  setUser(user: User) {
+    // Set user context
+    Sentry.setUser({
+      id: user.id,
+      email: user.email,
+      username: user.username,
+    });
+    
+    // Add custom context
+    Sentry.setContext('permissions', {
+      roles: user.roles,
+      features: user.enabledFeatures,
+    });
+    
+    // Add tags
+    Sentry.setTag('subscription', user.subscriptionTier);
+  }
+  
+  clearUser() {
+    Sentry.setUser(null);
+  }
+}
+```
+
+## Router Instrumentation
+
+The SDK automatically instruments Angular Router when TraceService is initialized:
+
+```typescript
+import { Router } from '@angular/router';
+import { Component } from '@angular/core';
+import * as Sentry from '@sentry/angular';
+
+@Component({
+  selector: 'app-root',
+  template: '<router-outlet></router-outlet>',
+})
+export class AppComponent {
+  constructor(private router: Router) {
+    // Router events are automatically tracked
+    // Transaction names will match route paths
+  }
+}
+```
+
+## Advanced Configuration
+
+<Accordion title="Complete Angular Setup">
+  ```typescript
+  // main.ts
+  import { bootstrapApplication } from '@angular/platform-browser';
+  import { init, browserTracingIntegration, replayIntegration } from '@sentry/angular';
+  import { AppComponent } from './app/app.component';
+  import { appConfig } from './app/app.config';
+
+  init({
+    dsn: 'YOUR_DSN_HERE',
+    
+    environment: 'production',
+    release: 'my-app@1.0.0',
+    
+    integrations: [
+      browserTracingIntegration(),
+      replayIntegration({
+        maskAllText: true,
+        blockAllMedia: true,
+      }),
+    ],
+    
+    // Performance
+    tracesSampleRate: 0.2,
+    tracePropagationTargets: ['localhost', /^https:\/\/api\.example\.com/],
+    
+    // Session Replay
+    replaysSessionSampleRate: 0.1,
+    replaysOnErrorSampleRate: 1.0,
+    
+    // Error filtering
+    ignoreErrors: [
+      'Non-Error exception captured',
+      'ResizeObserver loop limit exceeded',
+    ],
+    
+    beforeSend(event, hint) {
+      // Filter or modify events
+      if (event.exception) {
+        console.log('Error captured:', hint.originalException);
+      }
+      return event;
+    },
+  });
+
+  bootstrapApplication(AppComponent, appConfig);
+  ```
+
+  ```typescript
+  // app.config.ts
+  import { ApplicationConfig, ErrorHandler, provideAppInitializer, inject } from '@angular/core';
+  import { provideRouter } from '@angular/router';
+  import { createErrorHandler, TraceService } from '@sentry/angular';
+  import { routes } from './app.routes';
+
+  export const appConfig: ApplicationConfig = {
+    providers: [
+      provideRouter(routes),
+      
+      {
+        provide: ErrorHandler,
+        useValue: createErrorHandler({
+          showDialog: true,
+          logErrors: true,
+        }),
+      },
+      
+      provideAppInitializer(() => {
+        inject(TraceService);
+      }),
+    ],
+  };
+  ```
+</Accordion>
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="TraceService" icon="chart-line">
+    Always inject TraceService to enable automatic route tracking.
+  </Card>
+  
+  <Card title="ErrorHandler" icon="shield">
+    Register the ErrorHandler provider to catch all Angular errors.
+  </Card>
+  
+  <Card title="Component Tracking" icon="layer-group">
+    Use TraceDirective for template-based tracking, decorators for classes.
+  </Card>
+  
+  <Card title="Lazy Loading" icon="rocket">
+    Component tracking works with lazy-loaded modules automatically.
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Router Tracking" icon="route" href="/routing">
+    Advanced router instrumentation
+  </Card>
+  
+  <Card title="HTTP Interceptor" icon="globe" href="/http-tracking">
+    Track HTTP requests and responses
+  </Card>
+  
+  <Card title="Performance" icon="gauge-high" href="/performance">
+    Component performance monitoring
+  </Card>
+  
+  <Card title="Source Maps" icon="map" href="/sourcemaps">
+    Upload source maps for production
+  </Card>
+</CardGroup>

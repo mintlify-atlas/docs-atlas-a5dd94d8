@@ -1,0 +1,451 @@
+---
+title: "Profiling"
+description: "Identify performance bottlenecks at the code level with profiling"
+---
+
+Profiling captures code-level performance data, helping you identify which functions are consuming the most CPU time and where optimization efforts should be focused.
+
+## What is Profiling?
+
+Profiling samples your application's call stack at regular intervals, creating a detailed picture of where time is spent:
+
+- **Function-level insights**: See which functions are slowest
+- **Call hierarchies**: Understand the call tree
+- **Flame graphs**: Visual representation of time spent
+- **CPU usage**: Identify CPU-intensive operations
+
+<Note>
+Profiling is currently available for Node.js, Python, PHP, Ruby, and other server-side platforms. Browser profiling support is limited.
+</Note>
+
+## Setup (Node.js)
+
+Enable profiling during SDK initialization:
+
+```javascript
+import * as Sentry from '@sentry/node';
+import { nodeProfilingIntegration } from '@sentry/profiling-node';
+
+Sentry.init({
+  dsn: 'your-dsn',
+  
+  // Enable tracing (required for profiling)
+  tracesSampleRate: 1.0,
+  
+  // Enable profiling
+  integrations: [
+    nodeProfilingIntegration(),
+  ],
+  
+  // Set profiling sample rate
+  profilesSampleRate: 1.0, // Profile 100% of sampled transactions
+});
+```
+
+<Warning>
+Profiling requires Node.js 16.0.0 or higher and the `@sentry/profiling-node` package.
+</Warning>
+
+## Sampling
+
+### Profile Sample Rate
+
+Percentage of **sampled transactions** to profile:
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  tracesSampleRate: 0.1,      // Sample 10% of transactions
+  profilesSampleRate: 1.0,    // Profile 100% of sampled transactions
+  // Result: 10% of transactions are profiled
+});
+```
+
+### Dynamic Profiling
+
+Dynamically decide which transactions to profile:
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  tracesSampleRate: 1.0,
+  
+  // Conditional profiling
+  profilesSampler: (samplingContext) => {
+    // Always profile checkout operations
+    if (samplingContext.name?.includes('checkout')) {
+      return 1.0;
+    }
+    
+    // Profile 10% of other transactions
+    return 0.1;
+  },
+});
+```
+
+<Tip>
+In production, use lower profile sample rates (0.01-0.1) to reduce overhead while still collecting useful data.
+</Tip>
+
+## Continuous Profiling
+
+Continuously profile your application:
+
+```javascript
+import * as Sentry from '@sentry/node';
+import { nodeProfilingIntegration } from '@sentry/profiling-node';
+
+Sentry.init({
+  dsn: 'your-dsn',
+  integrations: [
+    nodeProfilingIntegration(),
+  ],
+  profilesSampleRate: 1.0,
+});
+
+const profiler = Sentry.getClient()?.getIntegrationByName('ProfilingIntegration')?._profiler;
+
+if (profiler) {
+  // Start continuous profiling
+  profiler.start();
+  
+  // Your application runs...
+  
+  // Stop profiling
+  profiler.stop();
+}
+```
+
+## Integration with Transactions
+
+Profiles are automatically attached to transactions:
+
+```javascript
+import * as Sentry from '@sentry/node';
+
+Sentry.startSpan(
+  {
+    name: 'process_data',
+    op: 'function'
+  },
+  () => {
+    // This transaction will be profiled (if sampled)
+    processData();
+  }
+);
+```
+
+The profile shows:
+- Which functions were called during the transaction
+- How long each function took
+- The call hierarchy
+- CPU time distribution
+
+## Manual Profiling
+
+### Start/Stop Profiler
+
+```javascript
+import { getClient } from '@sentry/node';
+
+const client = getClient();
+const profilingIntegration = client?.getIntegrationByName('ProfilingIntegration');
+const profiler = profilingIntegration?._profiler;
+
+if (profiler) {
+  // Start profiling
+  profiler.startProfiler();
+  
+  // Run code to profile
+  await expensiveOperation();
+  
+  // Stop profiling
+  profiler.stopProfiler();
+}
+```
+
+<Note>
+Most applications should use automatic profiling via `profilesSampleRate` rather than manual control.
+</Note>
+
+## Understanding Profiles
+
+### Flame Graphs
+
+Profiles are visualized as flame graphs in Sentry:
+
+- **Width**: Time spent in the function
+- **Height**: Call stack depth
+- **Color**: Different colors for different functions
+- **Hover**: See function details
+
+### Profile Data
+
+Each profile includes:
+
+```typescript
+interface Profile {
+  // Metadata
+  event_id: string;
+  version: string;
+  platform: string;
+  release: string;
+  environment: string;
+  
+  // Runtime information
+  runtime: {
+    name: string;    // "node"
+    version: string; // "20.10.0"
+  };
+  
+  // Profile data
+  profile: {
+    samples: ThreadCpuSample[];  // CPU samples
+    stacks: ThreadCpuStack[];    // Call stacks
+    frames: ThreadCpuFrame[];    // Stack frames
+    thread_metadata: {};
+  };
+  
+  // Transaction link
+  transaction?: {
+    name: string;
+    id: string;
+    trace_id: string;
+  };
+}
+```
+
+## Performance Overhead
+
+Profiling has minimal overhead:
+
+- **Sampling-based**: Only captures at intervals (not every function call)
+- **Efficient**: Native code for stack capture
+- **Configurable**: Adjust sample rate to balance detail vs overhead
+
+### Typical Overhead
+
+- **CPU**: 1-5% additional CPU usage
+- **Memory**: ~5-10MB per profile
+- **Impact**: Negligible for most applications
+
+```javascript
+// Production-friendly configuration
+Sentry.init({
+  dsn: 'your-dsn',
+  tracesSampleRate: 0.1,     // 10% of transactions
+  profilesSampleRate: 0.5,   // 50% of sampled transactions
+  // Result: 5% of total requests profiled
+});
+```
+
+## Practical Examples
+
+### Express.js API
+
+```javascript
+import * as Sentry from '@sentry/node';
+import { nodeProfilingIntegration } from '@sentry/profiling-node';
+import express from 'express';
+
+Sentry.init({
+  dsn: 'your-dsn',
+  integrations: [
+    Sentry.httpIntegration(),
+    nodeProfilingIntegration(),
+  ],
+  tracesSampleRate: 1.0,
+  profilesSampleRate: 1.0,
+});
+
+const app = express();
+
+// Profiling is automatic for instrumented requests
+app.get('/api/heavy-operation', async (req, res) => {
+  // This will be profiled
+  const result = await heavyComputation();
+  res.json(result);
+});
+
+app.listen(3000);
+```
+
+### Background Job
+
+```javascript
+import * as Sentry from '@sentry/node';
+import { nodeProfilingIntegration } from '@sentry/profiling-node';
+
+Sentry.init({
+  dsn: 'your-dsn',
+  integrations: [nodeProfilingIntegration()],
+  tracesSampleRate: 1.0,
+  profilesSampleRate: 1.0,
+});
+
+async function processJob(job) {
+  // Create a transaction for profiling
+  await Sentry.startSpan(
+    {
+      name: `job.${job.type}`,
+      op: 'queue.process'
+    },
+    async () => {
+      // Job processing is profiled
+      await job.process();
+    }
+  );
+}
+```
+
+### Critical Path Profiling
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  integrations: [nodeProfilingIntegration()],
+  tracesSampleRate: 1.0,
+  
+  // Only profile critical operations
+  profilesSampler: (samplingContext) => {
+    const criticalOps = ['checkout', 'payment', 'data_export'];
+    
+    if (criticalOps.some(op => samplingContext.name?.includes(op))) {
+      return 1.0; // Profile all critical operations
+    }
+    
+    return 0.01; // Profile 1% of others
+  },
+});
+```
+
+## Analyzing Profiles
+
+### Finding Slow Functions
+
+1. **Look for wide bars**: Functions that take a lot of time
+2. **Check self-time**: Time spent in the function itself (not children)
+3. **Identify hot paths**: Call paths that appear frequently
+4. **Compare with baseline**: Look for regressions
+
+### Common Issues to Look For
+
+- **Synchronous I/O**: Blocking operations
+- **Inefficient algorithms**: O(n²) loops
+- **Unnecessary computation**: Repeated calculations
+- **Large object processing**: JSON parsing, serialization
+- **Deep call stacks**: Excessive function calls
+
+## Best Practices
+
+1. **Start with low sample rates**: 0.01-0.1 in production
+2. **Profile consistently**: Keep profiling enabled
+3. **Compare over time**: Look for regressions
+4. **Focus on hot paths**: Optimize frequently-called code
+5. **Combine with tracing**: Use profiles with performance monitoring
+6. **Monitor overhead**: Ensure profiling doesn't impact users
+
+## Profiling vs Other Tools
+
+### Profiling vs Tracing
+
+- **Tracing**: Shows *what* operations ran and their duration
+- **Profiling**: Shows *where* time was spent at the code level
+
+```javascript
+// Tracing: Operation took 500ms
+Sentry.startSpan({ name: 'process_data' }, () => {
+  processData(); // 500ms
+});
+
+// Profiling: Shows that calculateSum() took 300ms of the 500ms
+// and processArray() took 200ms
+```
+
+### Profiling vs Debugging
+
+- **Debugging**: Step-by-step execution
+- **Profiling**: Statistical sampling in production
+
+## Troubleshooting
+
+### Profiling Not Working
+
+```javascript
+// Check Node.js version
+console.log('Node version:', process.version);
+// Must be >= 16.0.0
+
+// Check integration
+const client = Sentry.getClient();
+const profiling = client?.getIntegrationByName('ProfilingIntegration');
+
+if (!profiling) {
+  console.error('Profiling integration not found');
+}
+
+// Check sample rates
+console.log('Traces sample rate:', client.getOptions().tracesSampleRate);
+console.log('Profiles sample rate:', client.getOptions().profilesSampleRate);
+```
+
+### High Memory Usage
+
+```javascript
+// Reduce sample rates
+Sentry.init({
+  dsn: 'your-dsn',
+  tracesSampleRate: 0.1,
+  profilesSampleRate: 0.1,
+  // Only 1% of requests profiled
+});
+```
+
+### Missing Profiles
+
+Profiles require:
+1. Profiling integration installed
+2. Transaction sampling enabled
+3. Profile sampling enabled
+4. Node.js >= 16.0.0
+
+## Platform Support
+
+### Node.js
+
+```javascript
+import { nodeProfilingIntegration } from '@sentry/profiling-node';
+
+Sentry.init({
+  integrations: [nodeProfilingIntegration()],
+  profilesSampleRate: 1.0,
+});
+```
+
+### Other Platforms
+
+- **Python**: `sentry_sdk.profiler`
+- **PHP**: Native profiling support
+- **Ruby**: `sentry-ruby` with profiling
+- **Browser**: Limited support (experimental)
+
+<Note>
+Check the platform-specific documentation for profiling setup details.
+</Note>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Performance" icon="gauge" href="/core/performance">
+    Performance monitoring overview
+  </Card>
+  <Card title="Tracing" icon="route" href="/core/tracing">
+    Combine profiling with tracing
+  </Card>
+  <Card title="Spans" icon="clock" href="/core/spans">
+    Understand span timing
+  </Card>
+  <Card title="Session Replay" icon="video" href="/core/session-replay">
+    Visual debugging with replay
+  </Card>
+</CardGroup>

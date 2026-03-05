@@ -1,0 +1,526 @@
+---
+title: Solid SDK
+description: Error monitoring and performance tracking for Solid.js applications
+---
+
+<Note>
+  This SDK is in **Beta**. The API is stable but updates may include minor changes in behavior.
+  For SolidStart applications, see the [@sentry/solidstart](https://github.com/getsentry/sentry-javascript/tree/develop/packages/solidstart) SDK.
+</Note>
+
+The Sentry Solid SDK provides error monitoring and performance tracking for Solid.js applications with support for Solid Router and TanStack Router.
+
+## Installation
+
+<CodeGroup>
+```bash npm
+npm install @sentry/solid
+```
+
+```bash yarn
+yarn add @sentry/solid
+```
+
+```bash pnpm
+pnpm add @sentry/solid
+```
+</CodeGroup>
+
+## Basic Setup
+
+Initialize Sentry before rendering your Solid app:
+
+```typescript
+import { render } from 'solid-js/web';
+import * as Sentry from '@sentry/solid';
+import App from './App';
+
+// Initialize Sentry
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  
+  integrations: [
+    Sentry.browserTracingIntegration(),
+    Sentry.replayIntegration(),
+  ],
+  
+  // Performance Monitoring
+  tracesSampleRate: 1.0,
+  
+  // Session Replay
+  replaysSessionSampleRate: 0.1,
+  replaysOnErrorSampleRate: 1.0,
+});
+
+// Render your app
+render(() => <App />, document.getElementById('root'));
+```
+
+## Error Boundary
+
+Wrap Solid's ErrorBoundary with Sentry to automatically capture errors:
+
+```typescript
+import * as Sentry from '@sentry/solid';
+import { ErrorBoundary } from 'solid-js';
+
+// Create Sentry-wrapped ErrorBoundary
+const SentryErrorBoundary = Sentry.withSentryErrorBoundary(ErrorBoundary);
+
+function App() {
+  return (
+    <SentryErrorBoundary
+      fallback={(err, reset) => (
+        <div>
+          <h1>Error: {err.message}</h1>
+          <button onClick={reset}>Try again</button>
+        </div>
+      )}
+    >
+      <ProblematicComponent />
+    </SentryErrorBoundary>
+  );
+}
+
+render(() => <App />, document.getElementById('root'));
+```
+
+## Solid Router Integration
+
+### Setup
+
+Use `solidRouterBrowserTracingIntegration` for automatic route tracking:
+
+```typescript
+import * as Sentry from '@sentry/solid';
+import { solidRouterBrowserTracingIntegration, withSentryRouterRouting } from '@sentry/solid/solidrouter';
+import { Route, Router } from '@solidjs/router';
+import { render } from 'solid-js/web';
+
+// Initialize Sentry with Solid Router integration
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  
+  integrations: [
+    solidRouterBrowserTracingIntegration(),
+  ],
+  
+  tracesSampleRate: 1.0,
+});
+
+// Wrap your Router component
+const SentryRouter = withSentryRouterRouting(Router);
+
+render(
+  () => (
+    <SentryRouter>
+      <Route path="/" component={Home} />
+      <Route path="/about" component={About} />
+      <Route path="/users/:id" component={UserProfile} />
+    </SentryRouter>
+  ),
+  document.getElementById('root'),
+);
+```
+
+### Supported Routers
+
+You can wrap `Router`, `MemoryRouter`, or `HashRouter`:
+
+```typescript
+import { Router, MemoryRouter, HashRouter } from '@solidjs/router';
+import { withSentryRouterRouting } from '@sentry/solid/solidrouter';
+
+// Choose the router you need
+const SentryRouter = withSentryRouterRouting(Router);
+const SentryMemoryRouter = withSentryRouterRouting(MemoryRouter);
+const SentryHashRouter = withSentryRouterRouting(HashRouter);
+```
+
+## TanStack Router Integration
+
+For TanStack Router, use the dedicated integration:
+
+```typescript
+import * as Sentry from '@sentry/solid';
+import { tanstackRouterBrowserTracingIntegration } from '@sentry/solid/tanstackrouter';
+import { createRouter } from '@tanstack/solid-router';
+import { render } from 'solid-js/web';
+
+// Create your router
+const router = createRouter({
+  // your router configuration
+  routes: [
+    {
+      path: '/',
+      component: Home,
+    },
+    {
+      path: '/about',
+      component: About,
+    },
+  ],
+});
+
+// Type registration for TanStack Router
+declare module '@tanstack/solid-router' {
+  interface Register {
+    router: typeof router;
+  }
+}
+
+// Initialize Sentry with TanStack Router integration
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  
+  integrations: [
+    tanstackRouterBrowserTracingIntegration(router),
+  ],
+  
+  tracesSampleRate: 1.0,
+});
+
+render(() => <App />, document.getElementById('root'));
+```
+
+## Performance Monitoring
+
+### Custom Spans
+
+Track specific operations:
+
+```typescript
+import * as Sentry from '@sentry/solid';
+import { createSignal, onMount } from 'solid-js';
+
+function DataComponent() {
+  const [data, setData] = createSignal(null);
+  
+  onMount(async () => {
+    await Sentry.startSpan(
+      {
+        name: 'fetch-data',
+        op: 'http.client',
+      },
+      async () => {
+        const response = await fetch('/api/data');
+        const json = await response.json();
+        setData(json);
+      },
+    );
+  });
+  
+  return <div>{JSON.stringify(data())}</div>;
+}
+```
+
+### Resource Timing
+
+Track resource loading:
+
+```typescript
+import * as Sentry from '@sentry/solid';
+import { createResource } from 'solid-js';
+
+async function fetchUser(id: number) {
+  return await Sentry.startSpan(
+    {
+      name: `fetch-user-${id}`,
+      op: 'http.client',
+    },
+    async () => {
+      const response = await fetch(`/api/users/${id}`);
+      return response.json();
+    },
+  );
+}
+
+function UserProfile(props) {
+  const [user] = createResource(() => props.id, fetchUser);
+  
+  return (
+    <div>
+      {user.loading && <p>Loading...</p>}
+      {user() && <div>{user().name}</div>}
+    </div>
+  );
+}
+```
+
+## Error Handling
+
+### Manual Error Capture
+
+```typescript
+import * as Sentry from '@sentry/solid';
+import { createSignal } from 'solid-js';
+
+function FormComponent() {
+  const [error, setError] = createSignal(null);
+  
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    
+    try {
+      await submitForm(formData);
+    } catch (err) {
+      setError(err.message);
+      
+      Sentry.captureException(err, {
+        tags: {
+          component: 'FormComponent',
+          action: 'submit',
+        },
+        contexts: {
+          form: {
+            fields: Object.keys(formData),
+          },
+        },
+      });
+    }
+  };
+  
+  return (
+    <form onSubmit={handleSubmit}>
+      {error() && <div class="error">{error()}</div>}
+      {/* form fields */}
+    </form>
+  );
+}
+```
+
+## Context & User Information
+
+### Setting User Context
+
+```typescript
+import * as Sentry from '@sentry/solid';
+import { createEffect } from 'solid-js';
+
+function App() {
+  const [user] = useAuth();
+  
+  createEffect(() => {
+    if (user()) {
+      Sentry.setUser({
+        id: user().id,
+        email: user().email,
+        username: user().username,
+      });
+    } else {
+      Sentry.setUser(null);
+    }
+  });
+  
+  return <div>{/* app content */}</div>;
+}
+```
+
+### Adding Breadcrumbs
+
+```typescript
+import * as Sentry from '@sentry/solid';
+
+function NavigationButton(props) {
+  const handleClick = () => {
+    Sentry.addBreadcrumb({
+      category: 'navigation',
+      message: `User clicked ${props.label}`,
+      level: 'info',
+      data: {
+        destination: props.href,
+      },
+    });
+    
+    navigate(props.href);
+  };
+  
+  return <button onClick={handleClick}>{props.label}</button>;
+}
+```
+
+## Session Replay
+
+Capture user sessions:
+
+```typescript
+import * as Sentry from '@sentry/solid';
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  
+  integrations: [
+    Sentry.replayIntegration({
+      maskAllText: true,
+      blockAllMedia: true,
+      maskAllInputs: true,
+    }),
+  ],
+  
+  replaysSessionSampleRate: 0.1,
+  replaysOnErrorSampleRate: 1.0,
+});
+```
+
+## Advanced Features
+
+<Tabs>
+  <Tab title="User Feedback">
+    ```typescript
+    import * as Sentry from '@sentry/solid';
+
+    Sentry.init({
+      dsn: 'YOUR_DSN_HERE',
+      
+      integrations: [
+        Sentry.feedbackIntegration({
+          autoInject: true,
+          colorScheme: 'light',
+        }),
+      ],
+    });
+    ```
+  </Tab>
+
+  <Tab title="HTTP Monitoring">
+    ```typescript
+    import * as Sentry from '@sentry/solid';
+
+    Sentry.init({
+      dsn: 'YOUR_DSN_HERE',
+      
+      integrations: [
+        Sentry.httpClientIntegration({
+          failedRequestStatusCodes: [[400, 599]],
+        }),
+      ],
+    });
+    ```
+  </Tab>
+
+  <Tab title="Browser Profiling">
+    ```typescript
+    import * as Sentry from '@sentry/solid';
+
+    Sentry.init({
+      dsn: 'YOUR_DSN_HERE',
+      
+      integrations: [
+        Sentry.browserProfilingIntegration(),
+      ],
+      
+      profilesSampleRate: 1.0,
+    });
+    ```
+  </Tab>
+</Tabs>
+
+## Store Integration
+
+Track store updates:
+
+```typescript
+import * as Sentry from '@sentry/solid';
+import { createStore } from 'solid-js/store';
+
+function createTrackedStore(initialState) {
+  const [state, setState] = createStore(initialState);
+  
+  // Wrap setState to add breadcrumbs
+  const trackedSetState = (...args) => {
+    Sentry.addBreadcrumb({
+      category: 'state',
+      message: 'Store updated',
+      level: 'info',
+      data: {
+        updates: args,
+      },
+    });
+    
+    return setState(...args);
+  };
+  
+  return [state, trackedSetState];
+}
+```
+
+## Configuration
+
+<Accordion title="Complete Configuration Example">
+  ```typescript
+  import * as Sentry from '@sentry/solid';
+
+  Sentry.init({
+    dsn: 'YOUR_DSN_HERE',
+    
+    // Environment
+    environment: 'production',
+    release: 'my-app@1.0.0',
+    
+    // Performance
+    tracesSampleRate: 0.2,
+    tracePropagationTargets: [
+      'localhost',
+      /^https:\/\/api\.example\.com/,
+    ],
+    
+    // Session Replay
+    replaysSessionSampleRate: 0.1,
+    replaysOnErrorSampleRate: 1.0,
+    
+    // Error Filtering
+    ignoreErrors: [
+      'ResizeObserver loop limit exceeded',
+      /^Non-Error promise rejection/,
+    ],
+    
+    beforeSend(event, hint) {
+      // Filter or modify events
+      if (event.exception) {
+        console.log('Error captured:', hint.originalException);
+      }
+      return event;
+    },
+  });
+  ```
+</Accordion>
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="ErrorBoundary" icon="shield">
+    Always wrap your app with SentryErrorBoundary for automatic error capture.
+  </Card>
+  
+  <Card title="Router Integration" icon="route">
+    Use router integrations for accurate transaction names and navigation tracking.
+  </Card>
+  
+  <Card title="Reactive Context" icon="sync">
+    Use `createEffect` to update Sentry context when signals change.
+  </Card>
+  
+  <Card title="Resource Tracking" icon="gauge">
+    Wrap resource fetchers with spans to track loading performance.
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="SolidStart" icon="rocket" href="https://github.com/getsentry/sentry-javascript/tree/develop/packages/solidstart">
+    Upgrade to SolidStart SDK for full-stack support
+  </Card>
+  
+  <Card title="Source Maps" icon="map" href="/sourcemaps">
+    Upload source maps for production
+  </Card>
+  
+  <Card title="Session Replay" icon="video" href="/session-replay">
+    Set up session replay
+  </Card>
+  
+  <Card title="Performance" icon="gauge-high" href="/performance">
+    Performance monitoring deep dive
+  </Card>
+</CardGroup>

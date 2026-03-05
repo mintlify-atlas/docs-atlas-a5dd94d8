@@ -1,0 +1,311 @@
+---
+title: "Scopes"
+description: "Manage contextual data for events using Sentry's scope system"
+---
+
+Sentry uses a three-tier scope system to manage contextual data: **Global Scope**, **Isolation Scope**, and **Current Scope**. Understanding these scopes is essential for properly organizing your error tracking.
+
+## Scope Types
+
+### Global Scope
+
+The global scope applies to **all events** in your application:
+
+```javascript
+import * as Sentry from '@sentry/browser';
+
+const globalScope = Sentry.getGlobalScope();
+globalScope.setTag('app_version', '2.1.0');
+globalScope.setUser({
+  id: 'global-user',
+  environment: 'production'
+});
+```
+
+### Isolation Scope
+
+The isolation scope is active for the current execution context (e.g., per request in Node.js, per page in browsers):
+
+```javascript
+const isolationScope = Sentry.getIsolationScope();
+isolationScope.setTag('request_id', '123-456');
+isolationScope.setContext('session', {
+  started_at: Date.now(),
+  page_views: 5
+});
+```
+
+### Current Scope
+
+The current scope is the most local scope, typically used for individual operations:
+
+```javascript
+const currentScope = Sentry.getCurrentScope();
+currentScope.setTag('operation', 'checkout');
+```
+
+<Note>
+Data from all three scopes is merged when an event is sent. More specific scopes override less specific ones: Current Scope > Isolation Scope > Global Scope.
+</Note>
+
+## Working with Scopes
+
+### Creating Temporary Scopes
+
+Use `withScope()` to create a temporary scope for specific operations:
+
+```javascript
+Sentry.withScope((scope) => {
+  scope.setTag('section', 'payment');
+  scope.setLevel('warning');
+  scope.setContext('payment', {
+    method: 'credit_card',
+    amount: 99.99
+  });
+  
+  Sentry.captureMessage('Payment processed');
+});
+// Scope is automatically cleaned up here
+```
+
+### Creating Isolation Scopes
+
+Create a new isolation scope for separate execution contexts:
+
+```javascript
+Sentry.withIsolationScope((isolationScope) => {
+  isolationScope.setUser({
+    id: 'user-123',
+    email: 'user@example.com'
+  });
+  
+  isolationScope.setTag('tenant', 'acme-corp');
+  
+  // All operations here share this isolation scope
+  doWork();
+});
+```
+
+<Warning>
+Using `withIsolationScope()` in environments without an async context strategy (like browsers) may lead to unexpected behavior. This function is primarily designed for server-side environments.
+</Warning>
+
+## Setting Scope Data
+
+### User Information
+
+Set user information on any scope:
+
+```javascript
+Sentry.setUser({
+  id: 'user-123',
+  email: 'user@example.com',
+  username: 'john_doe',
+  ip_address: '{{auto}}' // Use 'auto' for automatic IP detection
+});
+
+// Clear user data
+Sentry.setUser(null);
+```
+
+### Tags
+
+Tags are searchable key-value pairs:
+
+```javascript
+// Set a single tag
+Sentry.setTag('environment', 'production');
+
+// Set multiple tags
+Sentry.setTags({
+  environment: 'production',
+  version: '2.1.0',
+  feature: 'checkout'
+});
+
+// Unset a tag
+Sentry.setTag('feature', undefined);
+```
+
+### Extra Data
+
+Extra data provides additional context (not searchable):
+
+```javascript
+// Set a single extra field
+Sentry.setExtra('cart_items', [
+  { id: 1, name: 'Product A' },
+  { id: 2, name: 'Product B' }
+]);
+
+// Set multiple extra fields
+Sentry.setExtras({
+  cart_total: 149.98,
+  shipping_method: 'express',
+  coupon_code: 'SAVE10'
+});
+```
+
+### Context
+
+Context provides structured data for specific categories:
+
+```javascript
+Sentry.setContext('character', {
+  name: 'Mighty Fighter',
+  level: 19,
+  character_class: 'Warrior'
+});
+
+Sentry.setContext('device', {
+  model: 'iPhone 14',
+  os: 'iOS 16.0',
+  memory: '6GB'
+});
+
+// Remove a context
+Sentry.setContext('device', null);
+```
+
+### Attributes
+
+Attributes are applied to logs and metrics (and spans in the future):
+
+```javascript
+import { getCurrentScope } from '@sentry/browser';
+
+const scope = getCurrentScope();
+
+// Set attributes
+scope.setAttributes({
+  is_admin: true,
+  payment_selection: 'credit_card',
+  render_duration: { value: 250, unit: 'ms' }
+});
+
+// Set a single attribute
+scope.setAttribute('user_role', 'admin');
+
+// Remove an attribute
+scope.removeAttribute('user_role');
+```
+
+<Tip>
+Currently, only strings, numbers, and boolean attributes are fully supported. More complex types will be added in future versions.
+</Tip>
+
+## Scope Manipulation
+
+### Cloning Scopes
+
+```javascript
+import { getCurrentScope } from '@sentry/browser';
+
+const originalScope = getCurrentScope();
+const clonedScope = originalScope.clone();
+
+clonedScope.setTag('is_clone', true);
+```
+
+### Clearing Scopes
+
+```javascript
+import { getCurrentScope } from '@sentry/browser';
+
+const scope = getCurrentScope();
+scope.clear(); // Removes all data except the client
+```
+
+### Updating Scopes
+
+```javascript
+import { getCurrentScope } from '@sentry/browser';
+
+const scope = getCurrentScope();
+
+// Update with an object
+scope.update({
+  tags: { feature: 'beta' },
+  user: { id: '123' },
+  level: 'warning'
+});
+
+// Update with a function
+scope.update((scope) => {
+  scope.setTag('processed', true);
+  return scope;
+});
+```
+
+## Scope Listeners
+
+Listen to scope changes:
+
+```javascript
+import { getCurrentScope } from '@sentry/browser';
+
+const scope = getCurrentScope();
+
+scope.addScopeListener((updatedScope) => {
+  console.log('Scope updated:', updatedScope.getScopeData());
+});
+```
+
+## Advanced Patterns
+
+### Setting Transaction Names
+
+```javascript
+import { getCurrentScope } from '@sentry/browser';
+
+const scope = getCurrentScope();
+scope.setTransactionName('/checkout/payment');
+```
+
+<Note>
+Setting the transaction name on the scope does NOT change the name of the active span. Use `Sentry.updateSpanName()` to change the active span's name.
+</Note>
+
+### Fingerprinting
+
+Group similar errors together:
+
+```javascript
+import { getCurrentScope } from '@sentry/browser';
+
+const scope = getCurrentScope();
+scope.setFingerprint(['{{ default }}', 'payment-error']);
+```
+
+### Setting Severity Level
+
+```javascript
+import { getCurrentScope } from '@sentry/browser';
+
+const scope = getCurrentScope();
+scope.setLevel('warning');
+```
+
+## Best Practices
+
+1. **Use the right scope**: Global scope for app-wide data, isolation scope for request/session data, current scope for operation-specific data
+2. **Clean up temporary scopes**: Always use `withScope()` for temporary data to ensure proper cleanup
+3. **Avoid polluting global scope**: Only set truly global data on the global scope
+4. **Be mindful of async operations**: Scope data may not persist across async boundaries in some environments
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Context" icon="info-circle" href="/core/context">
+    Learn more about context types and structured data
+  </Card>
+  <Card title="Breadcrumbs" icon="shoe-prints" href="/core/breadcrumbs">
+    Add breadcrumbs to track user actions
+  </Card>
+  <Card title="Performance" icon="gauge" href="/core/performance">
+    Associate performance data with scopes
+  </Card>
+  <Card title="Error Monitoring" icon="bug" href="/core/error-monitoring">
+    Capture errors with scope context
+  </Card>
+</CardGroup>

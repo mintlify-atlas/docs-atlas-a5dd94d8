@@ -1,122 +1,282 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
-  "name": "Mint Starter Kit",
+  "name": "Sentry JavaScript SDK",
+  "theme": "palm",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#5b3876",
+    "light": "#ac93b6",
+    "dark": "#d9d0df"
   },
-  "favicon": "/favicon.svg",
+  "favicon": "https://media.brand.dev/6c71faad-7cb5-4eda-a992-784c6817582e.svg",
+  "logo": {
+    "light": "https://media.brand.dev/2f338d6d-6b34-49c6-9ca6-ab4d0c17ddc0.svg",
+    "dark": "https://media.brand.dev/e2178d57-83b0-406d-8009-8e055c29f63a.svg"
+  },
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/getsentry/sentry-javascript"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/getsentry/sentry-javascript",
+      "x": "https://x.com/sentry",
+      "discord": "https://discord.gg/Ww9hbqr"
+    }
+  },
   "navigation": {
     "tabs": [
       {
-        "tab": "Guides",
+        "tab": "Getting Started",
         "groups": [
           {
-            "group": "Getting started",
+            "group": "Overview",
             "pages": [
-              "index",
-              "quickstart",
-              "development"
+              "introduction",
+              "quickstart"
             ]
           },
           {
-            "group": "Customization",
+            "group": "Installation",
             "pages": [
-              "essentials/settings",
-              "essentials/navigation"
-            ]
-          },
-          {
-            "group": "Writing content",
-            "pages": [
-              "essentials/markdown",
-              "essentials/code",
-              "essentials/images",
-              "essentials/reusable-snippets"
-            ]
-          },
-          {
-            "group": "AI tools",
-            "pages": [
-              "ai-tools/cursor",
-              "ai-tools/claude-code",
-              "ai-tools/windsurf"
+              "installation/browser",
+              "installation/node",
+              "installation/react",
+              "installation/vue",
+              "installation/angular",
+              "installation/nextjs",
+              "installation/sveltekit",
+              "installation/remix",
+              "installation/nuxt",
+              "installation/other-frameworks"
             ]
           }
         ]
       },
       {
-        "tab": "API reference",
+        "tab": "Platform SDKs",
         "groups": [
           {
-            "group": "API documentation",
+            "group": "Browser & Frontend",
             "pages": [
-              "api-reference/introduction"
+              "platforms/browser",
+              "platforms/react",
+              "platforms/vue",
+              "platforms/angular",
+              "platforms/svelte",
+              "platforms/solid",
+              "platforms/ember"
             ]
           },
           {
-            "group": "Endpoint examples",
+            "group": "Server & Backend",
             "pages": [
-              "api-reference/endpoint/get",
-              "api-reference/endpoint/create",
-              "api-reference/endpoint/delete",
-              "api-reference/endpoint/webhook"
+              "platforms/node",
+              "platforms/bun",
+              "platforms/deno",
+              "platforms/cloudflare"
+            ]
+          },
+          {
+            "group": "Full-Stack Frameworks",
+            "pages": [
+              "platforms/nextjs",
+              "platforms/sveltekit",
+              "platforms/remix",
+              "platforms/nuxt",
+              "platforms/astro",
+              "platforms/gatsby"
+            ]
+          },
+          {
+            "group": "Serverless & Edge",
+            "pages": [
+              "platforms/aws-serverless",
+              "platforms/google-cloud-serverless",
+              "platforms/vercel-edge"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Core Concepts",
+        "groups": [
+          {
+            "group": "Error Monitoring",
+            "pages": [
+              "core/error-monitoring",
+              "core/scopes",
+              "core/context",
+              "core/breadcrumbs"
+            ]
+          },
+          {
+            "group": "Performance Monitoring",
+            "pages": [
+              "core/performance",
+              "core/tracing",
+              "core/spans",
+              "core/distributed-tracing"
+            ]
+          },
+          {
+            "group": "Advanced Features",
+            "pages": [
+              "core/session-replay",
+              "core/profiling",
+              "core/user-feedback",
+              "core/feature-flags",
+              "core/logs-metrics"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Integrations",
+        "groups": [
+          {
+            "group": "Core Integrations",
+            "pages": [
+              "integrations/overview",
+              "integrations/event-filters",
+              "integrations/linked-errors",
+              "integrations/dedupe",
+              "integrations/request-data"
+            ]
+          },
+          {
+            "group": "AI Monitoring",
+            "pages": [
+              "integrations/ai/overview",
+              "integrations/ai/openai",
+              "integrations/ai/anthropic",
+              "integrations/ai/google-genai",
+              "integrations/ai/langchain",
+              "integrations/ai/langgraph",
+              "integrations/ai/vercel-ai"
+            ]
+          },
+          {
+            "group": "Database & Backend",
+            "pages": [
+              "integrations/supabase",
+              "integrations/postgres",
+              "integrations/mcp-server"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Core SDK",
+            "pages": [
+              "api/core/client",
+              "api/core/scope",
+              "api/core/transport",
+              "api/core/integrations"
+            ]
+          },
+          {
+            "group": "Capture Methods",
+            "pages": [
+              "api/capture/exception",
+              "api/capture/message",
+              "api/capture/event",
+              "api/capture/breadcrumb"
+            ]
+          },
+          {
+            "group": "Tracing API",
+            "pages": [
+              "api/tracing/spans",
+              "api/tracing/trace-context",
+              "api/tracing/propagation"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "api/configuration/options",
+              "api/configuration/transport-options",
+              "api/configuration/sampling"
+            ]
+          },
+          {
+            "group": "Types",
+            "pages": [
+              "api/types/event",
+              "api/types/span",
+              "api/types/breadcrumb",
+              "api/types/user"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Guides",
+        "groups": [
+          {
+            "group": "Configuration",
+            "pages": [
+              "guides/configuration/setup",
+              "guides/configuration/environment",
+              "guides/configuration/sampling",
+              "guides/configuration/filtering"
+            ]
+          },
+          {
+            "group": "Best Practices",
+            "pages": [
+              "guides/best-practices/error-handling",
+              "guides/best-practices/performance",
+              "guides/best-practices/bundle-size",
+              "guides/best-practices/sourcemaps"
+            ]
+          },
+          {
+            "group": "Migration",
+            "pages": [
+              "guides/migration/v7-to-v8",
+              "guides/migration/v8-to-v10",
+              "guides/migration/upgrading"
+            ]
+          },
+          {
+            "group": "Advanced",
+            "pages": [
+              "guides/advanced/custom-integrations",
+              "guides/advanced/custom-transports",
+              "guides/advanced/tunneling",
+              "guides/advanced/opentelemetry"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Contributing",
+        "groups": [
+          {
+            "group": "Development",
+            "pages": [
+              "contributing/setup",
+              "contributing/building",
+              "contributing/testing",
+              "contributing/workflow"
+            ]
+          },
+          {
+            "group": "Architecture",
+            "pages": [
+              "contributing/architecture/overview",
+              "contributing/architecture/monorepo",
+              "contributing/architecture/packages"
             ]
           }
         ]
       }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
-  },
-  "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
-  },
-  "navbar": {
-    "links": [
-      {
-        "label": "Support",
-        "href": "mailto:hi@mintlify.com"
-      }
-    ],
-    "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://dashboard.mintlify.com"
-    }
-  },
-  "contextual": {
-    "options": [
-     "copy",
-     "view",
-     "chatgpt",
-     "claude",
-     "perplexity",
-     "mcp",
-     "cursor",
-     "vscode"
-   ]
-  },
-  "footer": {
-    "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
-    }
+    ]
   }
 }

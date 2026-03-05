@@ -1,0 +1,494 @@
+---
+title: "addBreadcrumb"
+description: "Record breadcrumbs to track events leading up to an error"
+---
+
+The `addBreadcrumb` function records breadcrumbs that create a trail of events leading up to an error or issue.
+
+## Function Signature
+
+```typescript
+export function addBreadcrumb(
+  breadcrumb: Breadcrumb,
+  hint?: BreadcrumbHint
+): void
+```
+
+## Parameters
+
+<ParamField path="breadcrumb" type="Breadcrumb" required>
+  The breadcrumb object to add. See [Breadcrumb Types](/api/types/breadcrumb) for structure.
+</ParamField>
+
+<ParamField path="hint" type="BreadcrumbHint">
+  Additional context about the breadcrumb for filtering or processing.
+</ParamField>
+
+## Breadcrumb Structure
+
+```typescript
+export interface Breadcrumb {
+  type?: string;
+  level?: SeverityLevel;
+  event_id?: string;
+  category?: string;
+  message?: string;
+  data?: { [key: string]: any };
+  timestamp?: number;
+}
+```
+
+<ParamField path="type" type="string">
+  The type of breadcrumb: `'default'`, `'debug'`, `'error'`, `'navigation'`, `'http'`, `'info'`, `'query'`, `'transaction'`, `'ui'`, `'user'`.
+</ParamField>
+
+<ParamField path="level" type="SeverityLevel">
+  The severity level: `'fatal'`, `'error'`, `'warning'`, `'info'`, `'debug'`, or `'log'`. Defaults to `'info'`.
+</ParamField>
+
+<ParamField path="category" type="string">
+  A dotted string indicating what the breadcrumb is or where it comes from (e.g., `'ui.click'`, `'console.log'`, `'http.request'`).
+</ParamField>
+
+<ParamField path="message" type="string">
+  A human-readable message for the breadcrumb.
+</ParamField>
+
+<ParamField path="data" type="object">
+  Arbitrary data associated with the breadcrumb.
+</ParamField>
+
+<ParamField path="timestamp" type="number">
+  Unix timestamp in seconds when the breadcrumb occurred.
+</ParamField>
+
+## Basic Usage
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+Sentry.addBreadcrumb({
+  category: 'auth',
+  message: 'User logged in',
+  level: 'info'
+});
+```
+
+## Breadcrumb Types
+
+### Navigation Breadcrumbs
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+Sentry.addBreadcrumb({
+  type: 'navigation',
+  category: 'navigation',
+  message: 'User navigated to /dashboard',
+  data: {
+    from: '/home',
+    to: '/dashboard'
+  },
+  level: 'info'
+});
+```
+
+### HTTP Request Breadcrumbs
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+Sentry.addBreadcrumb({
+  type: 'http',
+  category: 'fetch',
+  message: 'GET /api/users',
+  data: {
+    url: 'https://api.example.com/users',
+    method: 'GET',
+    status_code: 200,
+    request_body_size: 0,
+    response_body_size: 1024
+  },
+  level: 'info',
+  timestamp: Date.now() / 1000
+});
+```
+
+### User Action Breadcrumbs
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+Sentry.addBreadcrumb({
+  type: 'user',
+  category: 'ui.click',
+  message: 'User clicked checkout button',
+  data: {
+    button_id: 'checkout-btn',
+    cart_items: 3,
+    total_amount: 99.99
+  },
+  level: 'info'
+});
+```
+
+### Database Query Breadcrumbs
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+Sentry.addBreadcrumb({
+  type: 'query',
+  category: 'db.query',
+  message: 'SELECT * FROM users WHERE id = $1',
+  data: {
+    'db.system': 'postgresql',
+    'db.name': 'myapp',
+    'db.statement': 'SELECT * FROM users WHERE id = $1',
+    duration_ms: 15
+  },
+  level: 'info'
+});
+```
+
+### Console Log Breadcrumbs
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+Sentry.addBreadcrumb({
+  type: 'debug',
+  category: 'console',
+  message: 'Processing payment...',
+  level: 'debug',
+  data: {
+    logger: 'console',
+    arguments: ['Processing payment for order', '12345']
+  }
+});
+```
+
+### Error Breadcrumbs
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+Sentry.addBreadcrumb({
+  type: 'error',
+  category: 'exception',
+  message: 'TypeError: Cannot read property of undefined',
+  level: 'error',
+  data: {
+    error_name: 'TypeError',
+    error_message: 'Cannot read property of undefined'
+  }
+});
+```
+
+## Implementation Details
+
+From `packages/core/src/breadcrumbs.ts`:
+
+```typescript
+export function addBreadcrumb(
+  breadcrumb: Breadcrumb,
+  hint?: BreadcrumbHint
+): void {
+  const client = getClient();
+  const isolationScope = getIsolationScope();
+
+  if (!client) return;
+
+  const { 
+    beforeBreadcrumb = null, 
+    maxBreadcrumbs = DEFAULT_BREADCRUMBS 
+  } = client.getOptions();
+
+  if (maxBreadcrumbs <= 0) return;
+
+  const timestamp = dateTimestampInSeconds();
+  const mergedBreadcrumb = { timestamp, ...breadcrumb };
+  
+  const finalBreadcrumb = beforeBreadcrumb
+    ? consoleSandbox(() => beforeBreadcrumb(mergedBreadcrumb, hint))
+    : mergedBreadcrumb;
+
+  if (finalBreadcrumb === null) return;
+
+  if (client.emit) {
+    client.emit('beforeAddBreadcrumb', finalBreadcrumb, hint);
+  }
+
+  isolationScope.addBreadcrumb(finalBreadcrumb, maxBreadcrumbs);
+}
+```
+
+## Automatic Breadcrumbs
+
+Many integrations automatically add breadcrumbs:
+
+### HTTP Integration
+
+```typescript
+import * as Sentry from '@sentry/node';
+import { httpIntegration } from '@sentry/node';
+
+Sentry.init({
+  dsn: 'your-dsn',
+  integrations: [
+    httpIntegration({
+      // Automatically creates breadcrumbs for HTTP requests
+      breadcrumbs: true
+    })
+  ]
+});
+
+// Breadcrumbs created automatically for:
+// - Outgoing HTTP requests
+// - Incoming HTTP requests
+// - Request/response details
+```
+
+### Console Integration
+
+```typescript
+import * as Sentry from '@sentry/node';
+import { captureConsoleIntegration } from '@sentry/node';
+
+Sentry.init({
+  dsn: 'your-dsn',
+  integrations: [
+    captureConsoleIntegration({
+      levels: ['log', 'info', 'warn', 'error']
+    })
+  ]
+});
+
+// Automatically captures console calls as breadcrumbs
+console.log('User action'); // Becomes a breadcrumb
+```
+
+## Filtering Breadcrumbs
+
+Use `beforeBreadcrumb` to filter or modify breadcrumbs:
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+Sentry.init({
+  dsn: 'your-dsn',
+  beforeBreadcrumb(breadcrumb, hint) {
+    // Filter out console breadcrumbs
+    if (breadcrumb.category === 'console') {
+      return null;
+    }
+    
+    // Scrub sensitive data
+    if (breadcrumb.data?.url) {
+      breadcrumb.data.url = breadcrumb.data.url.replace(/token=[^&]+/, 'token=REDACTED');
+    }
+    
+    return breadcrumb;
+  }
+});
+```
+
+## Advanced Examples
+
+### API Call Tracking
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+async function makeApiCall(endpoint: string, options: RequestInit) {
+  const startTime = Date.now();
+  
+  Sentry.addBreadcrumb({
+    type: 'http',
+    category: 'fetch',
+    message: `${options.method} ${endpoint}`,
+    data: {
+      url: endpoint,
+      method: options.method
+    },
+    level: 'info'
+  });
+  
+  try {
+    const response = await fetch(endpoint, options);
+    const duration = Date.now() - startTime;
+    
+    Sentry.addBreadcrumb({
+      type: 'http',
+      category: 'fetch',
+      message: `${options.method} ${endpoint} - ${response.status}`,
+      data: {
+        url: endpoint,
+        method: options.method,
+        status_code: response.status,
+        duration_ms: duration
+      },
+      level: response.ok ? 'info' : 'error'
+    });
+    
+    return response;
+  } catch (error) {
+    Sentry.addBreadcrumb({
+      type: 'error',
+      category: 'fetch',
+      message: `${options.method} ${endpoint} failed`,
+      data: {
+        error: String(error)
+      },
+      level: 'error'
+    });
+    throw error;
+  }
+}
+```
+
+### User Journey Tracking
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+class UserJourneyTracker {
+  trackStep(step: string, metadata?: Record<string, any>) {
+    Sentry.addBreadcrumb({
+      type: 'user',
+      category: 'user.journey',
+      message: `User completed: ${step}`,
+      data: {
+        step,
+        ...metadata
+      },
+      level: 'info'
+    });
+  }
+}
+
+const tracker = new UserJourneyTracker();
+
+// Track user journey
+tracker.trackStep('view_product', { productId: '123' });
+tracker.trackStep('add_to_cart', { productId: '123', quantity: 2 });
+tracker.trackStep('view_cart');
+tracker.trackStep('checkout_started');
+tracker.trackStep('payment_info_entered');
+tracker.trackStep('order_completed', { orderId: '456', amount: 99.99 });
+```
+
+### State Change Tracking
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+function trackStateChange<T>(
+  stateName: string,
+  oldValue: T,
+  newValue: T
+) {
+  Sentry.addBreadcrumb({
+    type: 'default',
+    category: 'state',
+    message: `${stateName} changed`,
+    data: {
+      state: stateName,
+      from: oldValue,
+      to: newValue
+    },
+    level: 'debug'
+  });
+}
+
+// Usage
+trackStateChange('connectionStatus', 'disconnected', 'connected');
+trackStateChange('userRole', 'guest', 'authenticated');
+```
+
+## Breadcrumb Limits
+
+By default, Sentry keeps the last 100 breadcrumbs:
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+Sentry.init({
+  dsn: 'your-dsn',
+  maxBreadcrumbs: 50 // Keep only last 50 breadcrumbs
+});
+```
+
+## Best Practices
+
+### 1. Use Descriptive Categories
+
+```typescript
+// Bad
+Sentry.addBreadcrumb({ message: 'Action' });
+
+// Good
+Sentry.addBreadcrumb({
+  category: 'user.action',
+  message: 'User clicked submit button'
+});
+```
+
+### 2. Include Relevant Data
+
+```typescript
+Sentry.addBreadcrumb({
+  category: 'api',
+  message: 'Fetching user data',
+  data: {
+    userId: '123',
+    endpoint: '/api/users/123',
+    cacheHit: false
+  }
+});
+```
+
+### 3. Use Appropriate Levels
+
+```typescript
+// Debug: Development info
+Sentry.addBreadcrumb({ message: 'Cache miss', level: 'debug' });
+
+// Info: Normal operations
+Sentry.addBreadcrumb({ message: 'User login', level: 'info' });
+
+// Warning: Potential issues
+Sentry.addBreadcrumb({ message: 'Retry attempt 3/5', level: 'warning' });
+
+// Error: Error conditions
+Sentry.addBreadcrumb({ message: 'API timeout', level: 'error' });
+```
+
+### 4. Don't Log Sensitive Data
+
+```typescript
+// Bad
+Sentry.addBreadcrumb({
+  message: 'User login',
+  data: {
+    username: 'john@example.com',
+    password: 'secret123' // Never log passwords!
+  }
+});
+
+// Good
+Sentry.addBreadcrumb({
+  message: 'User login',
+  data: {
+    username: 'john@example.com',
+    method: 'password'
+  }
+});
+```
+
+## Related
+
+- [Breadcrumb Types](/api/types/breadcrumb)
+- [captureException](/api/capture/exception)
+- [Scope](/api/core/scope)
+- [Configuration](/api/configuration/options)

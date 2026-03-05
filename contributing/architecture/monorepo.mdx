@@ -1,0 +1,409 @@
+---
+title: Monorepo Structure
+description: Understand how the Sentry JavaScript SDK monorepo is organized and managed.
+---
+
+The Sentry JavaScript SDK uses a monorepo structure to manage 40+ packages efficiently. This guide explains how the monorepo is organized and how the build system works.
+
+## Workspace Management
+
+### Yarn Workspaces
+
+The monorepo uses [Yarn Workspaces](https://classic.yarnpkg.com/en/docs/workspaces/) for dependency management. All workspaces are defined in the root `package.json`:
+
+```json
+"workspaces": [
+  "packages/angular",
+  "packages/astro",
+  "packages/aws-serverless",
+  "packages/browser",
+  "packages/browser-utils",
+  "packages/bun",
+  "packages/core",
+  "packages/cloudflare",
+  "packages/deno",
+  // ... 30+ more packages
+  "dev-packages/browser-integration-tests",
+  "dev-packages/e2e-tests",
+  "dev-packages/node-integration-tests",
+  "dev-packages/test-utils",
+  // ... more dev packages
+]
+```
+
+Yarn Workspaces provides:
+- **Shared dependencies** - Common dependencies are hoisted to the root `node_modules`
+- **Symlinked packages** - Internal packages are symlinked for local development
+- **Single lock file** - All dependencies managed in one `yarn.lock`
+
+### Installing Dependencies
+
+Run `yarn` from the root to install all dependencies for all packages:
+
+```bash
+yarn
+```
+
+This:
+1. Installs all dependencies listed in every `package.json`
+2. Hoists shared dependencies to the root
+3. Symlinks internal packages together
+
+## Directory Structure
+
+```
+sentry-javascript/
+├── packages/                    # Published packages (@sentry/*)
+│   ├── angular/
+│   ├── astro/
+│   ├── aws-serverless/
+│   ├── browser/                # Browser SDK
+│   │   ├── src/               # Source code
+│   │   ├── test/              # Tests
+│   │   ├── build/             # Build output (gitignored)
+│   │   ├── package.json       # Package configuration
+│   │   ├── tsconfig.json      # TypeScript config
+│   │   └── rollup.npm.config.mjs  # Build config
+│   ├── browser-utils/          # Browser utilities
+│   ├── bun/
+│   ├── core/                   # Core SDK
+│   ├── cloudflare/
+│   ├── deno/
+│   ├── node/                   # Node.js SDK
+│   ├── node-core/              # Node core (without OTel)
+│   ├── react/
+│   ├── vue/
+│   └── ...
+├── dev-packages/                # Development & testing packages
+│   ├── browser-integration-tests/
+│   ├── e2e-tests/
+│   │   └── test-applications/  # E2E test apps
+│   ├── node-integration-tests/
+│   ├── cloudflare-integration-tests/
+│   ├── test-utils/             # Shared test utilities
+│   ├── rollup-utils/           # Build utilities
+│   └── ...
+├── docs/                        # Documentation
+│   ├── commit-issue-pr-guidelines.md
+│   ├── gitflow.md
+│   ├── using-yalc.md
+│   └── ...
+├── scripts/                     # Build & automation scripts
+│   ├── verify-packages-versions.js
+│   ├── get-commit-list.ts
+│   └── ...
+├── tsconfig-templates/          # Shared TypeScript configs
+├── package.json                 # Root package with workspaces
+├── yarn.lock                    # Shared lock file
+├── nx.json                      # Nx configuration
+├── tsconfig.json                # Root TypeScript config
+└── CONTRIBUTING.md
+```
+
+## Build Orchestration with Nx
+
+The monorepo uses [Nx](https://nx.dev/) for build orchestration, caching, and affected analysis.
+
+### Why Nx?
+
+- **Task orchestration** - Runs tasks across packages in the correct order
+- **Intelligent caching** - Caches build outputs to speed up rebuilds
+- **Affected detection** - Runs tasks only for packages affected by changes
+- **Parallel execution** - Runs independent tasks in parallel
+
+### Nx Configuration
+
+Nx is configured in `nx.json`:
+
+```json
+{
+  "targetDefaults": {
+    "build:dev": {
+      "dependsOn": ["^build:transpile", "^build:types"]
+    },
+    "build:transpile": {
+      "dependsOn": ["^build:transpile"],
+      "outputs": [
+        "{projectRoot}/build/esm",
+        "{projectRoot}/build/cjs"
+      ],
+      "cache": true
+    },
+    "build:types": {
+      "dependsOn": ["^build:types"],
+      "outputs": [
+        "{projectRoot}/build/types",
+        "{projectRoot}/build/types-ts3.8"
+      ],
+      "cache": true
+    },
+    "test:unit": {
+      "dependsOn": ["build:types", "^build:types", "build:transpile", "^build:transpile"],
+      "cache": true
+    }
+  },
+  "cacheDirectory": ".nxcache",
+  "parallel": 5
+}
+```
+
+Key features:
+- `dependsOn` - Defines task dependencies
+- `^` prefix - Means "this target's dependencies from upstream packages"
+- `outputs` - Tells Nx what files to cache
+- `cache: true` - Enables caching for the target
+- `parallel: 5` - Runs up to 5 tasks in parallel
+
+### Running Tasks with Nx
+
+Nx provides several ways to run tasks:
+
+```bash
+# Run a target for all packages
+nx run-many -t build:dev
+
+# Run a target for specific packages
+nx run-many -t build:dev -p @sentry/browser @sentry/react
+
+# Run a target for affected packages only
+nx affected -t test
+```
+
+These are wrapped in convenient yarn scripts:
+
+```bash
+yarn build:dev        # nx run-many -t build:dev
+yarn test             # nx run-many -t test --exclude ...
+yarn test:pr          # nx affected -t test --exclude ...
+```
+
+## Package Structure
+
+Each package follows a consistent structure:
+
+```
+packages/browser/
+├── src/                        # Source TypeScript files
+│   ├── index.ts               # Main entry point
+│   ├── client.ts
+│   ├── sdk.ts
+│   └── integrations/
+├── test/                       # Test files
+│   ├── unit/
+│   └── integration/
+├── build/                      # Build output (gitignored)
+│   ├── cjs/                   # CommonJS build
+│   ├── esm/                   # ES modules build
+│   ├── types/                 # TypeScript definitions
+│   ├── types-ts3.8/           # Downleveled types
+│   └── bundles/               # CDN bundles (browser only)
+├── package.json                # Package configuration
+├── tsconfig.json               # TypeScript config (extends root)
+├── tsconfig.types.json         # TypeScript config for types
+├── rollup.npm.config.mjs       # Rollup build config
+└── README.md
+```
+
+### Package Entry Points
+
+Packages use [exports](https://nodejs.org/api/packages.html#exports) to define entry points:
+
+```json
+{
+  "name": "@sentry/browser",
+  "main": "build/cjs/index.js",
+  "module": "build/esm/index.js",
+  "types": "build/types/index.d.ts",
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "import": {
+        "types": "./build/types/index.d.ts",
+        "default": "./build/esm/index.js"
+      },
+      "require": {
+        "types": "./build/types/index.d.ts",
+        "default": "./build/cjs/index.js"
+      }
+    }
+  },
+  "typesVersions": {
+    "<5.0": {
+      "build/types/index.d.ts": [
+        "build/types-ts3.8/index.d.ts"
+      ]
+    }
+  }
+}
+```
+
+This configuration:
+- Supports both CommonJS and ES modules
+- Provides TypeScript types
+- Offers downleveled types for older TypeScript versions
+
+## Dependency Management
+
+### Internal Dependencies
+
+Packages depend on each other via workspace protocol:
+
+```json
+{
+  "name": "@sentry/react",
+  "dependencies": {
+    "@sentry/browser": "workspace:*",
+    "@sentry/core": "workspace:*"
+  }
+}
+```
+
+During publishing, `workspace:*` is replaced with the actual version.
+
+### Shared Dependencies
+
+Common development dependencies are defined in the root `package.json`:
+
+```json
+{
+  "devDependencies": {
+    "@rollup/plugin-commonjs": "^25.0.7",
+    "@rollup/plugin-node-resolve": "^16.0.3",
+    "@types/node": "^18.19.1",
+    "eslint": "8.57.0",
+    "nx": "22.5.0",
+    "rollup": "^4.59.0",
+    "typescript": "~5.8.0",
+    "vitest": "^3.2.4"
+  }
+}
+```
+
+### Dependency Resolutions
+
+Forced dependency versions are specified in `resolutions`:
+
+```json
+{
+  "resolutions": {
+    "**/nx/minimatch": "10.2.4",
+    "gauge/strip-ansi": "6.0.1",
+    "wide-align/string-width": "4.2.3",
+    "sucrase": "getsentry/sucrase#es2020-polyfills"
+  }
+}
+```
+
+## Build Outputs
+
+After building, each package contains:
+
+### CommonJS (CJS)
+
+```
+build/cjs/
+├── index.js
+├── client.js
+└── ...
+```
+
+For Node.js and bundlers that prefer CommonJS.
+
+### ES Modules (ESM)
+
+```
+build/esm/
+├── index.js
+├── client.js
+└── ...
+```
+
+For modern bundlers and native ES module support.
+
+### TypeScript Types
+
+```
+build/types/
+├── index.d.ts
+├── client.d.ts
+└── ...
+
+build/types-ts3.8/    # Downleveled for TS 3.8+
+├── index.d.ts
+├── client.d.ts
+└── ...
+```
+
+### CDN Bundles (Browser Only)
+
+```
+build/bundles/
+├── bundle.min.js
+├── bundle.min.js.map
+└── ...
+```
+
+## Nx Cache
+
+Nx caches build outputs in `.nxcache/`:
+
+```
+.nxcache/
+├── 3.8.0/
+│   └── cache/
+│       ├── <hash1>/    # Cached outputs for a specific task
+│       ├── <hash2>/
+│       └── ...
+└── terminalOutputs/
+```
+
+Caching speeds up rebuilds significantly. Clear it with:
+
+```bash
+yarn clean:caches
+```
+
+## Version Management with Volta
+
+Volta ensures everyone uses the same tool versions:
+
+```json
+"volta": {
+  "node": "20.19.2",
+  "yarn": "1.22.22",
+  "pnpm": "9.15.9"
+}
+```
+
+Packages inherit from the root:
+
+```json
+"volta": {
+  "extends": "../../package.json"
+}
+```
+
+## Scripts Organization
+
+Root scripts coordinate across all packages:
+
+```json
+"scripts": {
+  "build": "node ./scripts/verify-packages-versions.js && nx run-many -t build:transpile build:types build:bundle build:layer",
+  "build:dev": "nx run-many -t build:types build:transpile",
+  "build:dev:filter": "nx run-many -t build:dev -p",
+  "test": "nx run-many -t test --exclude ...",
+  "lint": "run-s lint:oxfmt lint:eslint",
+  "clean": "run-s clean:build clean:caches"
+}
+```
+
+- `run-s` - Run scripts sequentially
+- `run-p` - Run scripts in parallel
+- `nx run-many` - Run tasks across packages
+
+## Next Steps
+
+- Learn about [individual packages](/contributing/architecture/packages)
+- Understand the [build system](/contributing/building)
+- Explore the [development workflow](/contributing/workflow)

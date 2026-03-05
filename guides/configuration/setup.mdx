@@ -1,0 +1,277 @@
+---
+title: SDK Setup
+description: Learn how to initialize and configure the Sentry JavaScript SDK
+---
+
+The Sentry JavaScript SDK must be initialized as early as possible in your application lifecycle to capture errors and performance data effectively.
+
+## Basic Initialization
+
+The simplest way to initialize Sentry is with just your DSN:
+
+```javascript
+import * as Sentry from '@sentry/browser';
+
+Sentry.init({
+  dsn: 'https://examplePublicKey@o0.ingest.sentry.io/0',
+});
+```
+
+<Warning>
+Make sure to call `Sentry.init()` as early as possible in your application. Any errors that occur before initialization will not be captured.
+</Warning>
+
+## Common Configuration Options
+
+### Release Tracking
+
+Identify your application version to track regressions and know when issues were introduced:
+
+```javascript
+Sentry.init({
+  dsn: '__DSN__',
+  release: 'my-app@1.0.0',
+});
+```
+
+### Environment
+
+Differentiate between production, staging, and development environments:
+
+```javascript
+Sentry.init({
+  dsn: '__DSN__',
+  environment: process.env.NODE_ENV || 'development',
+});
+```
+
+<Tip>
+Set `environment` to help filter issues by deployment environment in Sentry's UI.
+</Tip>
+
+### Debug Mode
+
+Enable debug logging during development:
+
+```javascript
+Sentry.init({
+  dsn: '__DSN__',
+  debug: true, // Enable debug logging
+});
+```
+
+## Default Integrations
+
+The SDK includes default integrations that are automatically enabled:
+
+```javascript
+import * as Sentry from '@sentry/browser';
+
+// These integrations are enabled by default:
+// - inboundFiltersIntegration()
+// - functionToStringIntegration()
+// - conversationIdIntegration()
+// - browserApiErrorsIntegration()
+// - breadcrumbsIntegration()
+// - globalHandlersIntegration()
+// - linkedErrorsIntegration()
+// - dedupeIntegration()
+// - httpContextIntegration()
+// - cultureContextIntegration()
+// - browserSessionIntegration()
+
+Sentry.init({
+  dsn: '__DSN__',
+  // Default integrations are included automatically
+});
+```
+
+### Customizing Integrations
+
+You can add custom integrations or disable default ones:
+
+```javascript
+Sentry.init({
+  dsn: '__DSN__',
+  integrations: [
+    // Add custom integrations
+    Sentry.replayIntegration(),
+    Sentry.feedbackIntegration(),
+  ],
+});
+```
+
+To disable default integrations:
+
+```javascript
+Sentry.init({
+  dsn: '__DSN__',
+  defaultIntegrations: false, // Disable all defaults
+  integrations: [
+    // Manually add only the integrations you need
+    Sentry.globalHandlersIntegration(),
+    Sentry.breadcrumbsIntegration(),
+  ],
+});
+```
+
+## Transport Configuration
+
+By default, the SDK uses `makeFetchTransport`. You can customize the transport:
+
+```javascript
+import { makeFetchTransport } from '@sentry/browser';
+
+Sentry.init({
+  dsn: '__DSN__',
+  transport: makeFetchTransport,
+  transportOptions: {
+    // Custom fetch implementation
+    fetchImpl: customFetch,
+  },
+});
+```
+
+### Offline Transport
+
+For applications that need to work offline:
+
+```javascript
+import { makeBrowserOfflineTransport } from '@sentry/browser';
+import { makeFetchTransport } from '@sentry/browser';
+
+Sentry.init({
+  dsn: '__DSN__',
+  transport: makeBrowserOfflineTransport(makeFetchTransport),
+});
+```
+
+## Platform-Specific Initialization
+
+### Browser (Vanilla JavaScript)
+
+```javascript
+import * as Sentry from '@sentry/browser';
+
+Sentry.init({
+  dsn: '__DSN__',
+  integrations: [Sentry.browserTracingIntegration()],
+  tracesSampleRate: 1.0,
+});
+```
+
+### React
+
+```javascript
+import * as Sentry from '@sentry/react';
+
+Sentry.init({
+  dsn: '__DSN__',
+  integrations: [
+    Sentry.browserTracingIntegration(),
+    Sentry.replayIntegration(),
+  ],
+  tracesSampleRate: 1.0,
+  replaysSessionSampleRate: 0.1,
+  replaysOnErrorSampleRate: 1.0,
+});
+```
+
+### Node.js
+
+<Warning>
+For Node.js, you must initialize Sentry before importing any other modules. In v8+, this is critical for OpenTelemetry instrumentation to work correctly.
+</Warning>
+
+```javascript
+// MUST be the first import!
+import * as Sentry from '@sentry/node';
+
+Sentry.init({
+  dsn: '__DSN__',
+  tracesSampleRate: 1.0,
+});
+
+// Now import other modules
+import express from 'express';
+```
+
+### Next.js
+
+Next.js requires special initialization files. Create these files in your project root:
+
+**instrumentation.ts** (required for Next.js 15+, optional but recommended for 13.2+):
+
+```javascript
+export async function register() {
+  if (process.env.NEXT_RUNTIME === 'nodejs') {
+    await import('./sentry.server.config');
+  }
+
+  if (process.env.NEXT_RUNTIME === 'edge') {
+    await import('./sentry.edge.config');
+  }
+}
+```
+
+**sentry.server.config.ts**:
+
+```javascript
+import * as Sentry from '@sentry/nextjs';
+
+Sentry.init({
+  dsn: '__DSN__',
+  tracesSampleRate: 1.0,
+});
+```
+
+**sentry.client.config.ts**:
+
+```javascript
+import * as Sentry from '@sentry/nextjs';
+
+Sentry.init({
+  dsn: '__DSN__',
+  integrations: [
+    Sentry.replayIntegration(),
+  ],
+  tracesSampleRate: 1.0,
+  replaysSessionSampleRate: 0.1,
+  replaysOnErrorSampleRate: 1.0,
+});
+```
+
+## Verifying Your Setup
+
+After initialization, test that events are being sent:
+
+```javascript
+Sentry.init({
+  dsn: '__DSN__',
+});
+
+// Send a test error
+Sentry.captureException(new Error('Test error'));
+
+// Send a test message
+Sentry.captureMessage('Test message');
+```
+
+You should see these events appear in your Sentry project within a few seconds.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Environment Configuration" href="/guides/configuration/environment">
+    Configure environment-specific settings
+  </Card>
+  <Card title="Sampling" href="/guides/configuration/sampling">
+    Control data volume with sampling
+  </Card>
+  <Card title="Filtering" href="/guides/configuration/filtering">
+    Filter events before sending to Sentry
+  </Card>
+  <Card title="Performance Monitoring" href="/guides/best-practices/performance">
+    Set up performance monitoring
+  </Card>
+</CardGroup>

@@ -1,0 +1,308 @@
+---
+title: 'Linked Errors Integration'
+description: 'Automatically capture error cause chains and aggregate errors'
+---
+
+The Linked Errors integration automatically captures error cause chains and aggregate errors, following the error's `cause` property or custom error linking keys.
+
+## Installation
+
+This integration is **enabled by default** in all Sentry SDKs.
+
+```javascript
+import * as Sentry from '@sentry/node';
+
+Sentry.init({
+  dsn: 'your-dsn',
+  // linkedErrorsIntegration is included by default
+});
+```
+
+## How It Works
+
+The integration captures linked errors in two ways:
+
+### 1. Error Cause Chain (ECMAScript 2022)
+
+Automatic capture of errors linked via the `cause` property:
+
+```javascript
+try {
+  try {
+    throw new Error('Database connection failed');
+  } catch (dbError) {
+    throw new Error('Failed to fetch user data', { cause: dbError });
+  }
+} catch (error) {
+  Sentry.captureException(error);
+  // Captures both errors:
+  // 1. Failed to fetch user data
+  // 2. Database connection failed (as linked error)
+}
+```
+
+### 2. Aggregate Errors
+
+Captures all errors from `AggregateError`:
+
+```javascript
+const errors = [
+  new Error('Failed to load user profile'),
+  new Error('Failed to load user settings'),
+  new Error('Failed to load user preferences'),
+];
+
+const aggregateError = new AggregateError(
+  errors,
+  'Failed to load user data'
+);
+
+Sentry.captureException(aggregateError);
+// Captures all 4 errors with proper linking
+```
+
+## Configuration
+
+### Default Configuration
+
+The integration uses these defaults:
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  integrations: [
+    Sentry.linkedErrorsIntegration({
+      key: 'cause',  // Property to follow for linked errors
+      limit: 5,      // Maximum number of linked errors to capture
+    }),
+  ],
+});
+```
+
+### Custom Error Key
+
+If your application uses a custom property for error chaining:
+
+```javascript
+class CustomError extends Error {
+  constructor(message, previousError) {
+    super(message);
+    this.previousError = previousError;
+  }
+}
+
+Sentry.init({
+  dsn: 'your-dsn',
+  integrations: [
+    Sentry.linkedErrorsIntegration({
+      key: 'previousError', // Follow custom property
+      limit: 10,
+    }),
+  ],
+});
+```
+
+### Limit Linked Errors
+
+Control the maximum depth of error chains:
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  integrations: [
+    Sentry.linkedErrorsIntegration({
+      limit: 3, // Only capture up to 3 linked errors
+    }),
+  ],
+});
+```
+
+## Configuration Options
+
+<ParamField path="key" type="string" default="cause">
+  The property name to follow for linked errors
+</ParamField>
+
+<ParamField path="limit" type="number" default="5">
+  Maximum number of linked errors to capture
+</ParamField>
+
+## Practical Examples
+
+### Service Layer Error Chaining
+
+```javascript
+class DatabaseService {
+  async getUser(id) {
+    try {
+      return await db.query('SELECT * FROM users WHERE id = ?', [id]);
+    } catch (error) {
+      throw new Error(`Database query failed for user ${id}`, {
+        cause: error,
+      });
+    }
+  }
+}
+
+class UserService {
+  constructor(dbService) {
+    this.db = dbService;
+  }
+
+  async getUserProfile(id) {
+    try {
+      const user = await this.db.getUser(id);
+      return this.formatProfile(user);
+    } catch (error) {
+      throw new Error('Failed to load user profile', { cause: error });
+    }
+  }
+}
+
+// When captured, shows full error chain:
+// 1. Failed to load user profile
+// 2. Database query failed for user 123
+// 3. Connection timeout (original DB error)
+```
+
+### Parallel Operations with AggregateError
+
+```javascript
+async function loadUserData(userId) {
+  const promises = [
+    fetchProfile(userId),
+    fetchSettings(userId),
+    fetchPreferences(userId),
+    fetchHistory(userId),
+  ];
+
+  const results = await Promise.allSettled(promises);
+  
+  const errors = results
+    .filter(r => r.status === 'rejected')
+    .map(r => r.reason);
+
+  if (errors.length > 0) {
+    const error = new AggregateError(
+      errors,
+      `Failed to load ${errors.length} data sources for user ${userId}`
+    );
+    
+    Sentry.captureException(error);
+    // All individual errors are captured and linked
+  }
+}
+```
+
+### API Integration Error Context
+
+```javascript
+class APIClient {
+  async request(endpoint, options) {
+    try {
+      const response = await fetch(endpoint, options);
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        const apiError = new Error(
+          `API Error: ${errorData.message}`,
+        );
+        apiError.status = response.status;
+        apiError.data = errorData;
+        throw apiError;
+      }
+      
+      return await response.json();
+    } catch (error) {
+      throw new Error(`Failed to call ${endpoint}`, { cause: error });
+    }
+  }
+}
+
+// Error chain shows:
+// 1. Failed to call /api/users/123
+// 2. API Error: User not found (with status and data)
+```
+
+## How Linked Errors Appear in Sentry
+
+In the Sentry UI, linked errors appear as:
+
+1. **Main Exception**: The top-level error you captured
+2. **Chained Exceptions**: Related errors shown below, marked as "caused by"
+3. **Full Context**: Each error includes its own stacktrace and metadata
+
+## Source Code
+
+The Linked Errors integration is implemented in:
+
+`packages/core/src/integrations/linkederrors.ts:16`
+
+## Performance Considerations
+
+- The integration limits error chains to prevent excessive data
+- Each linked error includes its full stacktrace
+- Consider the `limit` option for deeply nested error chains
+
+## Best Practices
+
+<Tip>
+  Use error causes to preserve context when re-throwing errors
+</Tip>
+
+1. **Always preserve the original error**:
+   ```javascript
+   // Good
+   throw new Error('Operation failed', { cause: originalError });
+   
+   // Bad - loses original context
+   throw new Error('Operation failed');
+   ```
+
+2. **Add context at each layer**:
+   ```javascript
+   catch (error) {
+     throw new Error(`Failed to process order ${orderId}`, {
+       cause: error,
+     });
+   }
+   ```
+
+3. **Use AggregateError for parallel operations**:
+   ```javascript
+   const results = await Promise.allSettled(operations);
+   const errors = results
+     .filter(r => r.status === 'rejected')
+     .map(r => r.reason);
+   
+   if (errors.length > 0) {
+     throw new AggregateError(errors, 'Some operations failed');
+   }
+   ```
+
+## Troubleshooting
+
+### Linked Errors Not Appearing
+
+Ensure you're using the correct property name:
+
+```javascript
+// Check your error structure
+console.log(error.cause); // Should contain the linked error
+
+// Or configure custom key
+Sentry.linkedErrorsIntegration({ key: 'innerError' });
+```
+
+### Too Many Linked Errors
+
+Increase the limit if error chains are being truncated:
+
+```javascript
+Sentry.linkedErrorsIntegration({ limit: 10 });
+```
+
+## Related
+
+- [Event Filters](/integrations/event-filters) - Filter unwanted errors
+- [captureException](https://docs.sentry.io/platforms/javascript/usage/) - Manual error capture

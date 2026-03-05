@@ -1,0 +1,587 @@
+---
+title: Migrating from v7 to v8
+description: Upgrade guide for Sentry JavaScript SDK v7 to v8
+---
+
+Version 8 introduces major improvements to performance monitoring, OpenTelemetry integration, and a new Performance API. This guide helps you migrate from v7 to v8.
+
+## Prerequisites
+
+Before upgrading:
+
+1. Upgrade to the latest v7 version first
+2. Fix all deprecation warnings
+3. Review the [v8 changelog](https://github.com/getsentry/sentry-javascript/blob/develop/CHANGELOG.md)
+4. Test in a non-production environment
+
+<Warning>
+Version 8 requires:
+- **Node.js 14.18+** for CJS, **18.19.1+** for ESM
+- **Browser ES2018+** support (no IE11)
+- **Next.js 13.2+**
+- **React 16+**
+</Warning>
+
+## Installation
+
+```bash
+npm install @sentry/browser@^8.0.0
+# or
+yarn add @sentry/browser@^8.0.0
+```
+
+## Major Changes
+
+### 1. Performance API Overhaul
+
+The biggest change in v8 is the new Performance API based on OpenTelemetry.
+
+#### Before (v7):
+
+```javascript
+const transaction = Sentry.startTransaction({ name: 'my-transaction' });
+const span = transaction.startChild({ op: 'db.query' });
+
+try {
+  const result = await query();
+  span.finish();
+  transaction.finish();
+  return result;
+} catch (error) {
+  span.finish();
+  transaction.finish();
+  throw error;
+}
+```
+
+#### After (v8):
+
+```javascript
+import { startSpan } from '@sentry/browser';
+
+const result = await startSpan(
+  { name: 'my-transaction', op: 'task' },
+  async (span) => {
+    return await startSpan(
+      { name: 'db.query', op: 'db' },
+      async () => {
+        return await query();
+      }
+    );
+  }
+);
+```
+
+<Tip>
+The new API automatically handles span finishing and error handling. Spans are automatically finished when the callback completes.
+</Tip>
+
+### 2. Package Removals
+
+#### @sentry/tracing
+
+**Before (v7):**
+
+```javascript
+import * as Sentry from '@sentry/browser';
+import { BrowserTracing } from '@sentry/tracing';
+
+Sentry.init({
+  dsn: '__DSN__',
+  integrations: [new BrowserTracing()],
+});
+```
+
+**After (v8):**
+
+```javascript
+import * as Sentry from '@sentry/browser';
+
+Sentry.init({
+  dsn: '__DSN__',
+  integrations: [Sentry.browserTracingIntegration()],
+});
+```
+
+#### @sentry/integrations
+
+**Before (v7):**
+
+```javascript
+import { RewriteFrames } from '@sentry/integrations';
+
+Sentry.init({
+  integrations: [new RewriteFrames()],
+});
+```
+
+**After (v8):**
+
+```javascript
+import { rewriteFramesIntegration } from '@sentry/browser';
+
+Sentry.init({
+  integrations: [rewriteFramesIntegration()],
+});
+```
+
+#### @sentry/replay
+
+**Before (v7):**
+
+```javascript
+import { Replay } from '@sentry/replay';
+
+Sentry.init({
+  integrations: [new Replay()],
+});
+```
+
+**After (v8):**
+
+```javascript
+import { replayIntegration } from '@sentry/browser';
+
+Sentry.init({
+  integrations: [replayIntegration()],
+});
+```
+
+### 3. Hub to Scope API
+
+The Hub API is deprecated in favor of the new Scope API.
+
+**Before (v7):**
+
+```javascript
+const hub = Sentry.getCurrentHub();
+const client = hub.getClient();
+
+Sentry.configureScope((scope) => {
+  scope.setTag('key', 'value');
+});
+```
+
+**After (v8):**
+
+```javascript
+const client = Sentry.getClient();
+
+Sentry.getCurrentScope().setTag('key', 'value');
+```
+
+### 4. Integration Interface Changes
+
+All integrations are now functions instead of classes.
+
+**Before (v7):**
+
+```javascript
+import * as Sentry from '@sentry/browser';
+
+Sentry.init({
+  dsn: '__DSN__',
+  integrations: [
+    new Sentry.Integrations.Breadcrumbs(),
+    new Sentry.Integrations.LinkedErrors(),
+  ],
+});
+```
+
+**After (v8):**
+
+```javascript
+import * as Sentry from '@sentry/browser';
+
+Sentry.init({
+  dsn: '__DSN__',
+  integrations: [
+    Sentry.breadcrumbsIntegration(),
+    Sentry.linkedErrorsIntegration(),
+  ],
+});
+```
+
+## Node.js Specific Changes
+
+### Initialization Order
+
+In v8, Sentry MUST be initialized before any other imports.
+
+**Before (v7):**
+
+```javascript
+import express from 'express';
+import * as Sentry from '@sentry/node';
+
+Sentry.init({ dsn: '__DSN__' });
+
+const app = express();
+```
+
+**After (v8):**
+
+```javascript
+import * as Sentry from '@sentry/node';
+
+// Initialize FIRST
+Sentry.init({ dsn: '__DSN__' });
+
+// Then import other modules
+import express from 'express';
+
+const app = express();
+```
+
+### Express Error Handler
+
+**Before (v7):**
+
+```javascript
+app.use(Sentry.Handlers.requestHandler());
+app.use(Sentry.Handlers.tracingHandler());
+
+// Routes...
+
+app.use(Sentry.Handlers.errorHandler());
+```
+
+**After (v8):**
+
+```javascript
+// No request or tracing handler needed
+// Just add the error handler
+
+app.use(Sentry.setupExpressErrorHandler(app));
+```
+
+<Tip>
+In v8, instrumentation happens automatically via OpenTelemetry. You only need the error handler.
+</Tip>
+
+## Framework-Specific Migration
+
+### Next.js
+
+v8 requires using the instrumentation hook.
+
+**1. Enable instrumentation hook (Next.js 13-14):**
+
+```javascript
+// next.config.js
+module.exports = {
+  experimental: {
+    instrumentationHook: true, // Not needed in Next.js 15+
+  },
+};
+```
+
+**2. Create instrumentation.ts:**
+
+```javascript
+// instrumentation.ts
+export async function register() {
+  if (process.env.NEXT_RUNTIME === 'nodejs') {
+    await import('./sentry.server.config');
+  }
+
+  if (process.env.NEXT_RUNTIME === 'edge') {
+    await import('./sentry.edge.config');
+  }
+}
+```
+
+**3. Update withSentryConfig:**
+
+**Before (v7):**
+
+```javascript
+module.exports = withSentryConfig(
+  nextConfig,
+  { /* webpack plugin options */ },
+  { /* SDK options */ }
+);
+```
+
+**After (v8):**
+
+```javascript
+module.exports = withSentryConfig(nextConfig, {
+  // Combined options
+  org: 'your-org',
+  project: 'your-project',
+});
+```
+
+### React Router
+
+**Before (v7):**
+
+```javascript
+import { reactRouterV6Instrumentation } from '@sentry/react';
+
+Sentry.init({
+  integrations: [
+    new BrowserTracing({
+      routingInstrumentation: reactRouterV6Instrumentation(
+        useEffect,
+        useLocation,
+        useNavigationType,
+        createRoutesFromChildren,
+        matchRoutes
+      ),
+    }),
+  ],
+});
+```
+
+**After (v8):**
+
+```javascript
+import { reactRouterV6BrowserTracingIntegration } from '@sentry/react';
+
+Sentry.init({
+  integrations: [
+    reactRouterV6BrowserTracingIntegration({
+      useEffect,
+      useLocation,
+      useNavigationType,
+      createRoutesFromChildren,
+      matchRoutes,
+    }),
+  ],
+});
+```
+
+## API Changes
+
+### Removed APIs
+
+#### configureScope
+
+**Before:**
+
+```javascript
+Sentry.configureScope((scope) => {
+  scope.setTag('key', 'value');
+});
+```
+
+**After:**
+
+```javascript
+Sentry.getCurrentScope().setTag('key', 'value');
+```
+
+#### getActiveTransaction
+
+**Before:**
+
+```javascript
+const transaction = Sentry.getActiveTransaction();
+```
+
+**After:**
+
+```javascript
+import { getActiveSpan, getRootSpan } from '@sentry/browser';
+
+const span = getActiveSpan();
+const rootSpan = getRootSpan(span);
+```
+
+#### spanStatusfromHttpCode
+
+**Before:**
+
+```javascript
+import { spanStatusfromHttpCode } from '@sentry/tracing';
+
+const status = spanStatusfromHttpCode(200);
+```
+
+**After:**
+
+```javascript
+import { getSpanStatusFromHttpCode } from '@sentry/browser';
+
+const status = getSpanStatusFromHttpCode(200);
+```
+
+### Behavior Changes
+
+#### tracePropagationTargets
+
+In v7, `tracePropagationTargets` defaulted to `['localhost', /^\/(?!\/)/]`.
+
+In v8, it defaults to same-origin requests only.
+
+**Migration:**
+
+```javascript
+Sentry.init({
+  dsn: '__DSN__',
+  // Explicitly set if you need different behavior
+  tracePropagationTargets: [
+    'localhost',
+    /^https:\/\/api\.myapp\.com/,
+  ],
+});
+```
+
+#### Severity Enum
+
+**Before:**
+
+```javascript
+import { Severity } from '@sentry/types';
+
+scope.setLevel(Severity.Warning);
+```
+
+**After:**
+
+```javascript
+import type { SeverityLevel } from '@sentry/types';
+
+const level: SeverityLevel = 'warning';
+scope.setLevel(level);
+```
+
+## Step-by-Step Migration
+
+### 1. Update Dependencies
+
+```bash
+npm install @sentry/browser@^8.0.0
+# Remove deprecated packages
+npm uninstall @sentry/tracing @sentry/integrations @sentry/replay
+```
+
+### 2. Update Imports
+
+```javascript
+// Before
+import { BrowserTracing } from '@sentry/tracing';
+import { Replay } from '@sentry/replay';
+import { RewriteFrames } from '@sentry/integrations';
+
+// After
+import {
+  browserTracingIntegration,
+  replayIntegration,
+  rewriteFramesIntegration,
+} from '@sentry/browser';
+```
+
+### 3. Update Integrations
+
+```javascript
+// Before
+Sentry.init({
+  integrations: [
+    new BrowserTracing(),
+    new Replay(),
+  ],
+});
+
+// After
+Sentry.init({
+  integrations: [
+    browserTracingIntegration(),
+    replayIntegration(),
+  ],
+});
+```
+
+### 4. Update Performance Code
+
+```javascript
+// Before
+const transaction = Sentry.startTransaction({ name: 'my-op' });
+try {
+  const result = await doWork();
+  transaction.finish();
+  return result;
+} catch (error) {
+  transaction.finish();
+  throw error;
+}
+
+// After
+import { startSpan } from '@sentry/browser';
+
+const result = await startSpan({ name: 'my-op' }, async () => {
+  return await doWork();
+});
+```
+
+### 5. Update Scope Usage
+
+```javascript
+// Before
+Sentry.configureScope((scope) => {
+  scope.setTag('key', 'value');
+});
+
+// After
+Sentry.getCurrentScope().setTag('key', 'value');
+```
+
+### 6. Test Thoroughly
+
+1. Test error capturing
+2. Test performance monitoring
+3. Verify source maps
+4. Check integrations
+
+## Migration Checklist
+
+- [ ] Update all `@sentry/*` packages to v8
+- [ ] Remove deprecated packages (`@sentry/tracing`, `@sentry/integrations`, `@sentry/replay`)
+- [ ] Update integration syntax (class → function)
+- [ ] Replace `startTransaction` with `startSpan`
+- [ ] Replace `configureScope` with `getCurrentScope()`
+- [ ] Update Next.js to use instrumentation hook
+- [ ] Update Node.js initialization order
+- [ ] Test in staging environment
+- [ ] Update source map configuration
+- [ ] Review and test all custom instrumentation
+
+## Automated Migration
+
+Sentry provides a migration tool:
+
+```bash
+npx @sentry/migr8@latest
+```
+
+This tool automatically updates:
+- Integration syntax
+- Import statements
+- Performance API calls
+- Scope API usage
+
+<Warning>
+Always review the automated changes before committing. Test thoroughly!
+</Warning>
+
+## Getting Help
+
+If you encounter issues:
+
+1. Check the [full v8 migration guide](https://docs.sentry.io/platforms/javascript/migration/v7-to-v8/)
+2. Search [GitHub issues](https://github.com/getsentry/sentry-javascript/issues)
+3. Ask in [Discord](https://discord.gg/sentry)
+4. Review the [v8 changelog](https://github.com/getsentry/sentry-javascript/blob/develop/CHANGELOG.md)
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="v8 to v10 Migration" href="/guides/migration/v8-to-v10">
+    Upgrade from v8 to the latest version
+  </Card>
+  <Card title="Performance Monitoring" href="/guides/best-practices/performance">
+    Learn the new Performance API
+  </Card>
+</CardGroup>

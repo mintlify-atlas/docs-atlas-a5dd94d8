@@ -1,0 +1,611 @@
+---
+title: Custom Transports
+description: Build custom transport layers to control how events are sent to Sentry
+---
+
+Transports control how the SDK sends events to Sentry. You can create custom transports to route events through proxies, add custom headers, implement retry logic, or integrate with custom infrastructure.
+
+## Transport Basics
+
+A transport is responsible for sending envelopes (containing events, transactions, etc.) to Sentry:
+
+```javascript
+import { createTransport } from '@sentry/core';
+
+function makeCustomTransport(options) {
+  return createTransport(options, async ({ body, headers }) => {
+    // Send the envelope
+    const response = await fetch(options.url, {
+      method: 'POST',
+      headers,
+      body,
+    });
+    
+    return {
+      statusCode: response.status,
+      headers: {
+        'x-sentry-rate-limits': response.headers.get('x-sentry-rate-limits'),
+        'retry-after': response.headers.get('retry-after'),
+      },
+    };
+  });
+}
+
+export { makeCustomTransport };
+```
+
+## Using Custom Transports
+
+```javascript
+import * as Sentry from '@sentry/browser';
+import { makeCustomTransport } from './transports/custom';
+
+Sentry.init({
+  dsn: '__DSN__',
+  transport: makeCustomTransport,
+});
+```
+
+## Built-in Transports
+
+The SDK provides standard transports:
+
+### Browser
+
+```javascript
+import { makeFetchTransport } from '@sentry/browser';
+
+Sentry.init({
+  dsn: '__DSN__',
+  transport: makeFetchTransport, // Default
+});
+```
+
+### Node.js
+
+```javascript
+import { makeNodeTransport } from '@sentry/node';
+
+Sentry.init({
+  dsn: '__DSN__',
+  transport: makeNodeTransport, // Default
+});
+```
+
+## Custom Transport Examples
+
+### Proxy Transport
+
+Route events through a custom proxy:
+
+```javascript
+import { createTransport } from '@sentry/core';
+
+function makeProxyTransport(options) {
+  const proxyUrl = options.proxy || '/api/sentry';
+  
+  return createTransport(options, async ({ body }) => {
+    const response = await fetch(proxyUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-sentry-envelope',
+      },
+      body,
+    });
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    
+    return {
+      statusCode: response.status,
+    };
+  });
+}
+
+export { makeProxyTransport };
+```
+
+**Usage:**
+
+```javascript
+Sentry.init({
+  dsn: '__DSN__',
+  transport: makeProxyTransport,
+  transportOptions: {
+    proxy: '/api/sentry-proxy',
+  },
+});
+```
+
+### Batching Transport
+
+Batch multiple envelopes together:
+
+```javascript
+import { createTransport } from '@sentry/core';
+
+function makeBatchingTransport(options) {
+  const queue: any[] = [];
+  const batchSize = options.batchSize || 5;
+  const flushInterval = options.flushInterval || 5000;
+  let flushTimer: NodeJS.Timeout | null = null;
+  
+  function flush() {
+    if (queue.length === 0) return;
+    
+    const batch = queue.splice(0, queue.length);
+    
+    // Send batch
+    fetch(options.url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(batch),
+    }).catch(error => {
+      console.error('Failed to send batch:', error);
+    });
+  }
+  
+  return createTransport(options, async ({ body }) => {
+    queue.push(body);
+    
+    // Flush if batch size reached
+    if (queue.length >= batchSize) {
+      if (flushTimer) clearTimeout(flushTimer);
+      flush();
+    } else {
+      // Schedule flush
+      if (flushTimer) clearTimeout(flushTimer);
+      flushTimer = setTimeout(flush, flushInterval);
+    }
+    
+    return { statusCode: 200 };
+  });
+}
+
+export { makeBatchingTransport };
+```
+
+### Logging Transport
+
+Log events instead of sending them (useful for testing):
+
+```javascript
+import { createTransport } from '@sentry/core';
+
+function makeLoggingTransport(options) {
+  return createTransport(options, async ({ body, headers }) => {
+    console.log('--- Sentry Event ---');
+    console.log('Headers:', headers);
+    console.log('Body:', body);
+    console.log('---');
+    
+    return {
+      statusCode: 200,
+    };
+  });
+}
+
+export { makeLoggingTransport };
+```
+
+### Fallback Transport
+
+Try multiple endpoints with fallback:
+
+```javascript
+import { createTransport } from '@sentry/core';
+
+function makeFallbackTransport(options) {
+  const endpoints = options.endpoints || [options.url];
+  
+  return createTransport(options, async (transportOptions) => {
+    let lastError;
+    
+    for (const endpoint of endpoints) {
+      try {
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: transportOptions.headers,
+          body: transportOptions.body,
+        });
+        
+        if (response.ok) {
+          return {
+            statusCode: response.status,
+          };
+        }
+      } catch (error) {
+        lastError = error;
+        continue; // Try next endpoint
+      }
+    }
+    
+    throw lastError || new Error('All endpoints failed');
+  });
+}
+
+export { makeFallbackTransport };
+```
+
+## Transport with Custom Headers
+
+Add authentication or custom headers:
+
+```javascript
+import { createTransport } from '@sentry/core';
+
+function makeAuthTransport(options) {
+  return createTransport(options, async ({ body, headers }) => {
+    const response = await fetch(options.url, {
+      method: 'POST',
+      headers: {
+        ...headers,
+        'Authorization': `Bearer ${options.apiKey}`,
+        'X-Custom-Header': 'custom-value',
+      },
+      body,
+    });
+    
+    return {
+      statusCode: response.status,
+    };
+  });
+}
+
+export { makeAuthTransport };
+```
+
+**Usage:**
+
+```javascript
+Sentry.init({
+  dsn: '__DSN__',
+  transport: makeAuthTransport,
+  transportOptions: {
+    apiKey: process.env.API_KEY,
+  },
+});
+```
+
+## Offline Transport
+
+Queue events when offline:
+
+```javascript
+import { makeBrowserOfflineTransport } from '@sentry/browser';
+import { makeFetchTransport } from '@sentry/browser';
+
+Sentry.init({
+  dsn: '__DSN__',
+  transport: makeBrowserOfflineTransport(makeFetchTransport),
+});
+```
+
+**Custom offline implementation:**
+
+```javascript
+import { createTransport } from '@sentry/core';
+
+function makeOfflineTransport(baseTransport) {
+  return function(options) {
+    const base = baseTransport(options);
+    const queue: any[] = [];
+    
+    // Check connectivity
+    const isOnline = () => navigator.onLine;
+    
+    // Flush queue when online
+    window.addEventListener('online', () => {
+      queue.forEach(item => base.send(item));
+      queue.length = 0;
+    });
+    
+    return createTransport(options, async (transportOptions) => {
+      if (!isOnline()) {
+        queue.push(transportOptions);
+        return { statusCode: 200 }; // Queued
+      }
+      
+      return base.send(transportOptions);
+    });
+  };
+}
+
+export { makeOfflineTransport };
+```
+
+## Multiplexed Transport
+
+Send to multiple Sentry projects:
+
+```javascript
+import {
+  makeMultiplexedTransport,
+  MULTIPLEXED_TRANSPORT_EXTRA_KEY,
+} from '@sentry/browser';
+
+Sentry.init({
+  dsn: '__DSN__', // Default DSN
+  transport: makeMultiplexedTransport(
+    makeFetchTransport,
+    (args) => {
+      const event = args.getEvent();
+      
+      // Route to different projects based on event type
+      if (event && event.type === 'transaction') {
+        return [
+          { dsn: 'https://performance@sentry.io/project', release: 'v1.0' },
+        ];
+      }
+      
+      // Default: use main DSN
+      return [];
+    }
+  ),
+});
+
+// Tag events for specific projects
+Sentry.captureException(error, (scope) => {
+  scope.setExtra(MULTIPLEXED_TRANSPORT_EXTRA_KEY, [
+    { dsn: 'https://errors@sentry.io/project' },
+  ]);
+});
+```
+
+## Rate Limiting
+
+Handle rate limits properly:
+
+```javascript
+import { createTransport } from '@sentry/core';
+
+function makeRateLimitedTransport(options) {
+  let rateLimitedUntil: number | null = null;
+  
+  return createTransport(options, async (transportOptions) => {
+    // Check if rate limited
+    if (rateLimitedUntil && Date.now() < rateLimitedUntil) {
+      console.warn('Rate limited, dropping event');
+      return { statusCode: 429 };
+    }
+    
+    const response = await fetch(options.url, {
+      method: 'POST',
+      headers: transportOptions.headers,
+      body: transportOptions.body,
+    });
+    
+    // Handle rate limit headers
+    const retryAfter = response.headers.get('retry-after');
+    if (retryAfter) {
+      rateLimitedUntil = Date.now() + (parseInt(retryAfter, 10) * 1000);
+    }
+    
+    return {
+      statusCode: response.status,
+      headers: {
+        'retry-after': retryAfter,
+      },
+    };
+  });
+}
+
+export { makeRateLimitedTransport };
+```
+
+## Testing Transports
+
+```javascript
+import { describe, it, expect, vi } from 'vitest';
+import { makeCustomTransport } from './custom-transport';
+
+describe('CustomTransport', () => {
+  it('should send events', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+    });
+    
+    global.fetch = mockFetch;
+    
+    const transport = makeCustomTransport({
+      url: 'https://sentry.io/api/envelope',
+    });
+    
+    const result = await transport.send({
+      body: 'test-envelope',
+      headers: {},
+    });
+    
+    expect(result.statusCode).toBe(200);
+    expect(mockFetch).toHaveBeenCalledWith(
+      'https://sentry.io/api/envelope',
+      expect.objectContaining({
+        method: 'POST',
+        body: 'test-envelope',
+      })
+    );
+  });
+});
+```
+
+## Best Practices
+
+<Accordion title="Handle errors gracefully">
+  Don't let transport errors crash the app:
+  
+  ```javascript
+  return createTransport(options, async (transportOptions) => {
+    try {
+      const response = await fetch(/* ... */);
+      return { statusCode: response.status };
+    } catch (error) {
+      console.error('Transport error:', error);
+      return { statusCode: 500 }; // Failed
+    }
+  });
+  ```
+</Accordion>
+
+<Accordion title="Respect rate limits">
+  Honor Sentry's rate limit headers:
+  
+  ```javascript
+  const retryAfter = response.headers.get('retry-after');
+  if (retryAfter) {
+    // Wait before sending more events
+  }
+  ```
+</Accordion>
+
+<Accordion title="Implement timeouts">
+  Prevent hanging requests:
+  
+  ```javascript
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30000);
+  
+  try {
+    const response = await fetch(url, {
+      signal: controller.signal,
+      // ...
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+  ```
+</Accordion>
+
+<Accordion title="Implement retries with backoff">
+  Retry failed requests with exponential backoff:
+  
+  ```javascript
+  async function sendWithRetry(fn, maxRetries = 3) {
+    for (let i = 0; i < maxRetries; i++) {
+      try {
+        return await fn();
+      } catch (error) {
+        if (i === maxRetries - 1) throw error;
+        await new Promise(r => setTimeout(r, Math.pow(2, i) * 1000));
+      }
+    }
+  }
+  ```
+</Accordion>
+
+## Complete Example
+
+```javascript
+import { createTransport } from '@sentry/core';
+
+interface CustomTransportOptions {
+  url: string;
+  proxy?: string;
+  apiKey?: string;
+  timeout?: number;
+  retries?: number;
+}
+
+function makeProductionTransport(options: CustomTransportOptions) {
+  const {
+    url,
+    proxy,
+    apiKey,
+    timeout = 30000,
+    retries = 3,
+  } = options;
+  
+  const endpoint = proxy || url;
+  
+  async function sendWithRetry(
+    transportOptions: any,
+    retriesLeft: number
+  ): Promise<any> {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeout);
+    
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          ...transportOptions.headers,
+          ...(apiKey && { 'Authorization': `Bearer ${apiKey}` }),
+        },
+        body: transportOptions.body,
+        signal: controller.signal,
+      });
+      
+      clearTimeout(timeoutId);
+      
+      // Check for rate limits
+      const rateLimits = response.headers.get('x-sentry-rate-limits');
+      const retryAfter = response.headers.get('retry-after');
+      
+      if (response.status === 429 && retriesLeft > 0) {
+        const delay = retryAfter ? parseInt(retryAfter, 10) * 1000 : 1000;
+        await new Promise(resolve => setTimeout(resolve, delay));
+        return sendWithRetry(transportOptions, retriesLeft - 1);
+      }
+      
+      if (!response.ok && retriesLeft > 0) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        return sendWithRetry(transportOptions, retriesLeft - 1);
+      }
+      
+      return {
+        statusCode: response.status,
+        headers: {
+          'x-sentry-rate-limits': rateLimits,
+          'retry-after': retryAfter,
+        },
+      };
+    } catch (error) {
+      clearTimeout(timeoutId);
+      
+      if (retriesLeft > 0) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        return sendWithRetry(transportOptions, retriesLeft - 1);
+      }
+      
+      throw error;
+    }
+  }
+  
+  return createTransport(options, async (transportOptions) => {
+    return sendWithRetry(transportOptions, retries);
+  });
+}
+
+export { makeProductionTransport };
+```
+
+**Usage:**
+
+```javascript
+import * as Sentry from '@sentry/browser';
+import { makeProductionTransport } from './transports/production';
+
+Sentry.init({
+  dsn: '__DSN__',
+  transport: makeProductionTransport,
+  transportOptions: {
+    proxy: '/api/sentry',
+    apiKey: process.env.SENTRY_API_KEY,
+    timeout: 10000,
+    retries: 3,
+  },
+});
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Tunneling" href="/guides/advanced/tunneling">
+    Set up event tunneling through your backend
+  </Card>
+  <Card title="Custom Integrations" href="/guides/advanced/custom-integrations">
+    Build custom integrations
+  </Card>
+</CardGroup>

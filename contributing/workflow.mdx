@@ -1,0 +1,310 @@
+---
+title: Development Workflow
+description: Learn the Git workflow, commit guidelines, and PR process for contributing to the SDK.
+---
+
+This guide covers the development workflow for contributing to the Sentry JavaScript SDK, including Git Flow, commit guidelines, and the PR review process.
+
+## Git Flow
+
+We use [Git Flow](https://docs.github.com/en/get-started/quickstart/github-flow) as our branching model.
+
+### Key Principles
+
+- **Ongoing work happens on `develop`** - All active development and PRs target this branch
+- **`master` contains the last released state** - Whatever is on `master` reflects the most recent published version
+- **Never merge directly into `master`** - Releases are created by merging `develop` → `master`
+- **After release, merge back** - `master` is merged back into `develop` to keep them in sync
+
+### Branch Structure
+
+```
+master              ●─────────────●─────────────●  (releases)
+                     \           / \           /
+develop     ●────●───●───●───●───●───●───●───●───●  (active development)
+             \      /     \ /
+feature      ●─●─●        ●─●─●                    (feature branches)
+```
+
+### Creating a Feature Branch
+
+Always create feature branches from `develop`:
+
+```bash
+git checkout develop
+git pull origin develop
+git checkout -b feat/your-feature-name
+```
+
+Branch naming conventions:
+- `feat/feature-name` - New features
+- `fix/bug-name` - Bug fixes
+- `ref/refactor-name` - Refactoring
+- `docs/doc-name` - Documentation changes
+
+### Important Caveats
+
+While a release is pending, you may merge anything into `develop`, **except for changes to `package.json` files**.
+
+<Warning>
+  Changing `package.json` files on `develop` during a release will cause merge conflicts in the Git Flow PR (`master` → `develop`), because package versions are updated on `master` during the release.
+</Warning>
+
+### Handling Merge Conflicts
+
+If you encounter merge conflicts when merging `master` back into `develop`:
+
+1. Close the automated PR
+2. Create a new branch from `master`:
+   ```bash
+   git checkout master
+   git pull origin master
+   git checkout -b manual-develop-sync
+   ```
+3. Merge `develop` into this branch and resolve conflicts:
+   ```bash
+   git merge develop
+   # Resolve conflicts
+   git commit
+   ```
+4. Create a PR from `manual-develop-sync` → `develop`
+5. Merge with a merge commit (not squash)
+
+## Commit Guidelines
+
+### Commit Message Format
+
+We follow the [Sentry commit message format](https://develop.sentry.dev/commit-messages/#commit-message-format):
+
+```
+<type>(<scope>): <subject> (<github-id>)
+```
+
+**Example:**
+```
+feat(core): Set custom transaction source for event processors (#5722)
+```
+
+### Commit Types
+
+- `feat` - New feature
+- `fix` - Bug fix
+- `ref` - Refactoring
+- `perf` - Performance improvement
+- `docs` - Documentation changes
+- `test` - Test changes
+- `build` - Build system changes
+- `ci` - CI configuration changes
+- `chore` - Other changes
+
+### Commit Scope
+
+The scope should indicate which package(s) are affected:
+
+- `feat(browser):` - Changes to `@sentry/browser`
+- `fix(node):` - Changes to `@sentry/node`
+- `feat(core):` - Changes to `@sentry/core`
+- `feat(react):` - Changes to `@sentry/react`
+- `fix(nextjs):` - Changes to `@sentry/nextjs`
+
+### GitHub ID
+
+The GitHub PR number can be left out until the PR is merged. It will be added when squashing.
+
+### Example Commits
+
+```bash
+feat(browser): Add support for custom fingerprinting
+fix(node): Resolve memory leak in event processor
+ref(core): Simplify scope inheritance logic
+test(react): Add tests for error boundary
+docs(sveltekit): Update installation guide
+```
+
+## Before Committing
+
+Always run these commands before committing:
+
+```bash
+# 1. Format code
+yarn format
+
+# 2. Run linter
+yarn lint
+
+# 3. Run tests
+yarn test
+
+# 4. Build packages
+yarn build:dev
+```
+
+<Warning>
+  NEVER push directly to the `develop` branch. Always create a PR.
+</Warning>
+
+## Pull Request Process
+
+### Creating a PR
+
+1. **Push your branch to GitHub:**
+   ```bash
+   git push origin feat/your-feature-name
+   ```
+
+2. **Create the PR:**
+   - Target: `develop` (not `master`!)
+   - Title: Follow commit message format without the GitHub ID
+     ```
+     feat(browser): Add support for custom fingerprinting
+     ```
+   - Description: Explain the changes, why they're needed, and any relevant context
+
+3. **Add labels:**
+   - Package labels: `Package: Browser`, `Package: Node`, etc.
+   - Type labels: `Type: Feature`, `Type: Bug Fix`, etc.
+
+### PR Requirements
+
+- [ ] All tests pass
+- [ ] Linting passes
+- [ ] Non-trivial changes include tests
+- [ ] Breaking changes are documented
+- [ ] Commit message follows guidelines
+- [ ] PR targets `develop` branch
+
+### PR Review
+
+The SDK team will review your PR. You may be asked to:
+- Make changes
+- Add tests
+- Update documentation
+- Rebase on latest `develop`
+
+For more details, see [docs/pr-reviews.md](https://github.com/getsentry/sentry-javascript/blob/develop/docs/pr-reviews.md).
+
+## Merging PRs
+
+PRs are merged via **Squash and Merge**. This means all commits on the branch are squashed into a single commit on `develop`.
+
+<Note>
+  We cannot _enforce_ Squash Merge due to Git Flow usage. GitHub remembers the last merge method used, so double-check you're using "Squash and Merge."
+</Note>
+
+### Squash Merge Checklist
+
+- [ ] Rebase the branch on latest `develop`
+- [ ] Use "Squash and Merge" (not "Merge" or "Rebase and Merge")
+- [ ] Update the commit message to follow guidelines
+- [ ] Add the PR number to the commit message:
+  ```
+  feat(browser): Add support for custom fingerprinting (#5722)
+  ```
+- [ ] If you're a Sentry employee, assign yourself to the PR
+
+## Backporting
+
+To backport a commit to a previous major version, reflect this in the PR/commit title:
+
+```
+feat(v8/core): Set custom transaction source for event processors (#5722)
+```
+
+The major version (`v8/`) becomes a scope prefix.
+
+## Linting and Formatting
+
+### Run Linter
+
+```bash
+# Lint all packages
+yarn lint
+
+# Lint a single package
+cd packages/core
+yarn lint
+```
+
+Linting includes:
+- ESLint for code quality
+- Oxfmt for code formatting
+
+### Auto-fix Issues
+
+```bash
+# Fix all issues (lint + format)
+yarn fix
+
+# Fix only ESLint issues
+yarn fix:eslint
+
+# Fix only formatting
+yarn fix:oxfmt
+```
+
+### Check Formatting
+
+```bash
+yarn format:check
+```
+
+## Useful Commands
+
+### Clean Build Artifacts
+
+```bash
+# Clean build outputs and caches
+yarn clean
+
+# Clean everything including node_modules
+yarn clean:all
+
+# Clean only caches
+yarn clean:caches
+```
+
+### Check for Circular Dependencies
+
+```bash
+yarn circularDepCheck
+
+# Or for a specific package
+cd packages/core
+yarn circularDepCheck
+```
+
+### Update Snapshots
+
+```bash
+yarn test:update-snapshots
+```
+
+## External Contributors
+
+We highly appreciate external contributions! Here's what you need to know:
+
+1. **Fork the repository** on GitHub
+2. **Create a branch** from `develop` in your fork
+3. **Make your changes** following the guidelines in this document
+4. **Open a PR** against `develop` in the main repository
+5. **The SDK team will review** your PR shortly
+
+### Important Notes
+
+- Follow the [commit and PR guidelines](#commit-guidelines)
+- Non-trivial PRs must include tests
+- Make sure to sign the [Contributor License Agreement (CLA)](https://cla-assistant.io/getsentry/sentry-javascript)
+
+## Getting Help
+
+If you have questions:
+
+- Check the [SDK Development Guide](https://develop.sentry.dev/sdk/)
+- Ask on [Discord](https://discord.gg/Ww9hbqr)
+- Open a [GitHub Discussion](https://github.com/getsentry/sentry-javascript/discussions)
+
+## Next Steps
+
+- Explore the [monorepo architecture](/contributing/architecture/overview)
+- Learn about [package structure](/contributing/architecture/packages)
+- Understand how packages are organized in the [monorepo](/contributing/architecture/monorepo)

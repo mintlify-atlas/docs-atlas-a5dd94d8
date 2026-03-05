@@ -1,0 +1,498 @@
+---
+title: 'Anthropic Integration'
+description: 'Monitor Anthropic Claude API calls and responses'
+---
+
+The Anthropic integration automatically instruments Anthropic SDK calls to capture performance data and errors for Claude models.
+
+## Installation
+
+The integration is **enabled by default** in Node.js:
+
+```javascript
+import * as Sentry from '@sentry/node';
+
+Sentry.init({
+  dsn: 'your-dsn',
+  // anthropicAIIntegration is included by default
+});
+```
+
+## Basic Usage
+
+Just use the Anthropic SDK normally:
+
+```javascript
+import Anthropic from '@anthropic-ai/sdk';
+
+const anthropic = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY,
+});
+
+// Automatically instrumented
+const message = await anthropic.messages.create({
+  model: 'claude-3-5-sonnet-20241022',
+  max_tokens: 1024,
+  messages: [
+    { role: 'user', content: 'What is the capital of France?' },
+  ],
+});
+```
+
+## Configuration
+
+### Default Behavior
+
+By default, prompts and responses are **not captured**:
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  sendDefaultPii: false, // Default: no prompts/responses
+});
+```
+
+### Capture Prompts and Responses
+
+<Tabs>
+  <Tab title="Global Setting">
+    Enable for all AI integrations:
+
+    ```javascript
+    Sentry.init({
+      dsn: 'your-dsn',
+      sendDefaultPii: true, // Captures all inputs/outputs
+    });
+    ```
+  </Tab>
+  
+  <Tab title="Anthropic Only">
+    Enable only for Anthropic:
+
+    ```javascript
+    Sentry.init({
+      dsn: 'your-dsn',
+      sendDefaultPii: false,
+      integrations: [
+        Sentry.anthropicAIIntegration({
+          recordInputs: true,
+          recordOutputs: true,
+        }),
+      ],
+    });
+    ```
+  </Tab>
+  
+  <Tab title="Outputs Only">
+    Capture responses but not prompts:
+
+    ```javascript
+    Sentry.init({
+      dsn: 'your-dsn',
+      integrations: [
+        Sentry.anthropicAIIntegration({
+          recordInputs: false,
+          recordOutputs: true,
+        }),
+      ],
+    });
+    ```
+  </Tab>
+</Tabs>
+
+## Integration Options
+
+<ParamField path="recordInputs" type="boolean" default="sendDefaultPii">
+  Capture prompt messages
+</ParamField>
+
+<ParamField path="recordOutputs" type="boolean" default="sendDefaultPii">
+  Capture completion responses
+</ParamField>
+
+## Captured Data
+
+### Always Captured
+
+These attributes are always included:
+
+```javascript
+{
+  'gen_ai.operation.name': 'chat',
+  'gen_ai.request.model': 'claude-3-5-sonnet-20241022',
+  'gen_ai.system': 'anthropic',
+  'gen_ai.usage.input_tokens': 20,
+  'gen_ai.usage.output_tokens': 95,
+  'gen_ai.response.finish_reasons': ['end_turn'],
+  'gen_ai.request.temperature': 1.0,
+  'gen_ai.request.max_tokens': 1024,
+}
+```
+
+### When `recordInputs: true`
+
+Prompt messages and system prompts are captured:
+
+```javascript
+{
+  'gen_ai.system': 'You are a helpful AI assistant.',
+  'gen_ai.prompt.0.role': 'user',
+  'gen_ai.prompt.0.content': 'What is the capital of France?',
+}
+```
+
+### When `recordOutputs: true`
+
+Completion responses are captured:
+
+```javascript
+{
+  'gen_ai.completion.0.role': 'assistant',
+  'gen_ai.completion.0.content': 'The capital of France is Paris.',
+  'gen_ai.completion.0.finish_reason': 'end_turn',
+}
+```
+
+## Supported Operations
+
+### Message Creation
+
+```javascript
+const message = await anthropic.messages.create({
+  model: 'claude-3-5-sonnet-20241022',
+  max_tokens: 1024,
+  messages: [
+    { role: 'user', content: 'Hello, Claude!' },
+  ],
+});
+// Span: gen_ai.chat.completions
+```
+
+### Streaming Messages
+
+```javascript
+const stream = await anthropic.messages.create({
+  model: 'claude-3-5-sonnet-20241022',
+  max_tokens: 1024,
+  messages: [{ role: 'user', content: 'Tell me a story' }],
+  stream: true,
+});
+
+for await (const event of stream) {
+  if (event.type === 'content_block_delta') {
+    process.stdout.write(event.delta.text);
+  }
+}
+// Span includes full streaming response
+```
+
+### System Prompts
+
+```javascript
+const message = await anthropic.messages.create({
+  model: 'claude-3-5-sonnet-20241022',
+  max_tokens: 1024,
+  system: 'You are a helpful customer service agent.',
+  messages: [
+    { role: 'user', content: 'I need help with my order' },
+  ],
+});
+// System prompt captured when recordInputs: true
+```
+
+### Tool Use (Function Calling)
+
+```javascript
+const message = await anthropic.messages.create({
+  model: 'claude-3-5-sonnet-20241022',
+  max_tokens: 1024,
+  tools: [
+    {
+      name: 'get_weather',
+      description: 'Get the current weather for a location',
+      input_schema: {
+        type: 'object',
+        properties: {
+          location: {
+            type: 'string',
+            description: 'City name',
+          },
+        },
+        required: ['location'],
+      },
+    },
+  ],
+  messages: [
+    { role: 'user', content: 'What is the weather in Paris?' },
+  ],
+});
+// Tool use captured in span attributes
+```
+
+## Practical Examples
+
+### Multi-Turn Conversation
+
+```javascript
+import * as Sentry from '@sentry/node';
+import Anthropic from '@anthropic-ai/sdk';
+
+const anthropic = new Anthropic();
+
+async function chat(conversationHistory) {
+  return await Sentry.startSpan(
+    {
+      name: 'Claude Chat',
+      op: 'ai.chat',
+      attributes: {
+        'conversation.turns': conversationHistory.length,
+      },
+    },
+    async () => {
+      const message = await anthropic.messages.create({
+        model: 'claude-3-5-sonnet-20241022',
+        max_tokens: 1024,
+        messages: conversationHistory,
+      });
+      
+      return message.content[0].text;
+    }
+  );
+}
+
+// Usage
+const history = [
+  { role: 'user', content: 'What is 2+2?' },
+  { role: 'assistant', content: '2+2 equals 4.' },
+  { role: 'user', content: 'What about 3+3?' },
+];
+
+const response = await chat(history);
+```
+
+### Content Moderation
+
+```javascript
+async function moderateContent(content) {
+  return await Sentry.startSpan(
+    {
+      name: 'Content Moderation',
+      op: 'ai.moderation',
+    },
+    async () => {
+      const message = await anthropic.messages.create({
+        model: 'claude-3-5-sonnet-20241022',
+        max_tokens: 256,
+        system: 'You are a content moderation assistant. Analyze the following content and determine if it violates community guidelines.',
+        messages: [
+          { role: 'user', content },
+        ],
+      });
+      
+      return {
+        safe: message.content[0].text.includes('safe'),
+        analysis: message.content[0].text,
+      };
+    }
+  );
+}
+```
+
+### Document Analysis
+
+```javascript
+async function analyzeDocument(documentText) {
+  return await Sentry.startSpan(
+    {
+      name: 'Analyze Document',
+      op: 'ai.analysis',
+      attributes: {
+        'document.length': documentText.length,
+      },
+    },
+    async () => {
+      const message = await anthropic.messages.create({
+        model: 'claude-3-5-sonnet-20241022',
+        max_tokens: 2048,
+        messages: [
+          {
+            role: 'user',
+            content: `Please analyze this document and provide a summary:\n\n${documentText}`,
+          },
+        ],
+      });
+      
+      return message.content[0].text;
+    }
+  );
+}
+```
+
+### Tool Use with Weather API
+
+```javascript
+async function getWeatherAssistant(userQuery) {
+  const tools = [
+    {
+      name: 'get_weather',
+      description: 'Get current weather for a location',
+      input_schema: {
+        type: 'object',
+        properties: {
+          location: { type: 'string' },
+          unit: { type: 'string', enum: ['celsius', 'fahrenheit'] },
+        },
+        required: ['location'],
+      },
+    },
+  ];
+
+  return await Sentry.startSpan(
+    { name: 'Weather Assistant', op: 'ai.tool_use' },
+    async () => {
+      const message = await anthropic.messages.create({
+        model: 'claude-3-5-sonnet-20241022',
+        max_tokens: 1024,
+        tools,
+        messages: [{ role: 'user', content: userQuery }],
+      });
+
+      // Check if Claude wants to use a tool
+      const toolUse = message.content.find(block => block.type === 'tool_use');
+      
+      if (toolUse) {
+        // Call the actual weather API
+        const weatherData = await fetchWeather(toolUse.input.location);
+        
+        // Continue conversation with tool result
+        const followUp = await anthropic.messages.create({
+          model: 'claude-3-5-sonnet-20241022',
+          max_tokens: 1024,
+          tools,
+          messages: [
+            { role: 'user', content: userQuery },
+            { role: 'assistant', content: message.content },
+            {
+              role: 'user',
+              content: [
+                {
+                  type: 'tool_result',
+                  tool_use_id: toolUse.id,
+                  content: JSON.stringify(weatherData),
+                },
+              ],
+            },
+          ],
+        });
+        
+        return followUp.content[0].text;
+      }
+      
+      return message.content[0].text;
+    }
+  );
+}
+```
+
+## Model Support
+
+The integration supports all Claude models:
+
+- **Claude 3.5 Sonnet**: `claude-3-5-sonnet-20241022`
+- **Claude 3 Opus**: `claude-3-opus-20240229`
+- **Claude 3 Sonnet**: `claude-3-sonnet-20240229`
+- **Claude 3 Haiku**: `claude-3-haiku-20240307`
+- **Claude 2.1**: `claude-2.1`
+- **Claude 2.0**: `claude-2.0`
+
+## Performance Monitoring
+
+Track Claude performance metrics:
+
+- **Response Times**: API latency per model
+- **Token Usage**: Input and output tokens
+- **Stop Reasons**: Track why generations ended
+- **Error Rates**: Rate limits and API errors
+
+## Source Code
+
+The Anthropic integration is implemented in:
+
+`packages/node/src/integrations/tracing/anthropic-ai/index.ts:11`
+
+## Privacy Best Practices
+
+<Warning>
+  Claude conversations may contain sensitive user information.
+</Warning>
+
+### Filter Personal Information
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  sendDefaultPii: true,
+  
+  beforeSendSpan(span) {
+    // Remove PII from prompts
+    const promptContent = span.attributes?.['gen_ai.prompt.0.content'];
+    if (promptContent && typeof promptContent === 'string') {
+      // Redact email addresses
+      span.attributes['gen_ai.prompt.0.content'] = promptContent
+        .replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, '[EMAIL]');
+    }
+    
+    return span;
+  },
+});
+```
+
+### Selective Capture by Use Case
+
+```javascript
+async function processQuery(query, options = {}) {
+  const isPublic = options.isPublic ?? false;
+  
+  // Use a custom client configuration based on sensitivity
+  const integrations = isPublic
+    ? [Sentry.anthropicAIIntegration({ recordInputs: true, recordOutputs: true })]
+    : [Sentry.anthropicAIIntegration({ recordInputs: false, recordOutputs: false })];
+  
+  // Process with appropriate privacy settings
+  const message = await anthropic.messages.create({...});
+  return message;
+}
+```
+
+## Troubleshooting
+
+### Spans Not Appearing
+
+Ensure tracing is enabled:
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  tracesSampleRate: 1.0, // Capture 100% of traces
+});
+```
+
+### Streaming Responses Not Captured
+
+Streaming responses are fully captured. Token usage appears after the stream completes.
+
+### Tool Use Not Showing
+
+Tool use is captured in span attributes. Enable `recordOutputs: true` to see tool calls:
+
+```javascript
+Sentry.anthropicAIIntegration({
+  recordOutputs: true, // Captures tool use blocks
+});
+```
+
+## Related
+
+- [AI Monitoring Overview](/integrations/ai/overview)
+- [OpenAI Integration](/integrations/ai/openai)
+- [LangChain Integration](/integrations/ai/langchain)

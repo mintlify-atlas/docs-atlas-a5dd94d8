@@ -1,0 +1,680 @@
+---
+title: Performance Monitoring Best Practices
+description: Optimize performance monitoring configuration and reduce overhead
+---
+
+Performance monitoring helps identify slow operations and optimize user experience while minimizing overhead on your application.
+
+## Enabling Performance Monitoring
+
+### Browser Applications
+
+```javascript
+import * as Sentry from '@sentry/browser';
+
+Sentry.init({
+  dsn: '__DSN__',
+  integrations: [
+    Sentry.browserTracingIntegration(),
+  ],
+  tracesSampleRate: 0.1, // Capture 10% of transactions
+});
+```
+
+### Node.js Applications
+
+```javascript
+import * as Sentry from '@sentry/node';
+
+// MUST be first import
+Sentry.init({
+  dsn: '__DSN__',
+  tracesSampleRate: 0.1,
+});
+
+// Now import other modules
+import express from 'express';
+```
+
+<Warning>
+For Node.js SDK v8+, you MUST initialize Sentry before any other imports for OpenTelemetry instrumentation to work.
+</Warning>
+
+## Instrumentation
+
+### Automatic Instrumentation
+
+The SDK automatically instruments:
+
+**Browser:**
+- Page load transactions
+- Navigation transactions
+- Fetch/XHR requests
+- User interactions (clicks, form inputs)
+- Web Vitals (LCP, FID, CLS, INP, TTFB)
+
+**Node.js:**
+- HTTP/HTTPS requests
+- Express.js routes
+- Database queries (Prisma, MongoDB, MySQL, PostgreSQL)
+- GraphQL operations
+- Redis operations
+
+```javascript
+// Browser
+Sentry.init({
+  dsn: '__DSN__',
+  integrations: [
+    Sentry.browserTracingIntegration({
+      // Customize instrumentation
+      traceFetch: true,
+      traceXHR: true,
+      enableLongAnimationFrame: true,
+    }),
+  ],
+});
+
+// Node.js - integrations are auto-enabled
+Sentry.init({
+  dsn: '__DSN__',
+  tracesSampleRate: 0.1,
+  // These are enabled by default:
+  // - httpIntegration()
+  // - expressIntegration()
+  // - prismaIntegration()
+  // - etc.
+});
+```
+
+### Manual Instrumentation
+
+Create custom spans for specific operations:
+
+```javascript
+import { startSpan } from '@sentry/browser';
+
+const result = await startSpan(
+  {
+    name: 'complex-calculation',
+    op: 'function',
+    attributes: {
+      'calc.type': 'fibonacci',
+      'calc.input': n,
+    },
+  },
+  async (span) => {
+    const result = await fibonacci(n);
+    span.setAttribute('calc.result', result);
+    return result;
+  }
+);
+```
+
+### Nested Spans
+
+Track sub-operations:
+
+```javascript
+await startSpan(
+  { name: 'process-order', op: 'task' },
+  async (parentSpan) => {
+    await startSpan(
+      { name: 'validate-order', op: 'validation' },
+      async () => {
+        await validateOrder(order);
+      }
+    );
+    
+    await startSpan(
+      { name: 'charge-payment', op: 'payment' },
+      async () => {
+        await chargePayment(order);
+      }
+    );
+    
+    await startSpan(
+      { name: 'create-shipment', op: 'logistics' },
+      async () => {
+        await createShipment(order);
+      }
+    );
+  }
+);
+```
+
+## Controlling Span Creation
+
+### HTTP Instrumentation
+
+Control which requests create spans:
+
+```javascript
+import { httpIntegration } from '@sentry/node';
+
+Sentry.init({
+  dsn: '__DSN__',
+  integrations: [
+    httpIntegration({
+      tracing: {
+        // Don't create spans for certain URLs
+        shouldCreateSpanForRequest: (url) => {
+          return !url.includes('/health') && 
+                 !url.includes('/metrics');
+        },
+      },
+    }),
+  ],
+});
+```
+
+### Browser Request Instrumentation
+
+```javascript
+import { browserTracingIntegration } from '@sentry/browser';
+
+Sentry.init({
+  dsn: '__DSN__',
+  integrations: [
+    browserTracingIntegration({
+      shouldCreateSpanForRequest: (url) => {
+        // Don't trace analytics or ads
+        return !url.match(/google-analytics|doubleclick/);
+      },
+    }),
+  ],
+});
+```
+
+## Trace Propagation
+
+Control distributed tracing headers:
+
+```javascript
+Sentry.init({
+  dsn: '__DSN__',
+  // Propagate to same origin by default
+  // Customize for specific targets:
+  tracePropagationTargets: [
+    'localhost',
+    /^https:\/\/api\.myapp\.com/,
+    /^\/api\//,  // Same-origin API routes
+  ],
+});
+```
+
+<Tip>
+In v8+, trace propagation defaults to same-origin requests. Only set `tracePropagationTargets` for cross-origin distributed tracing.
+</Tip>
+
+## Web Vitals
+
+Monitor Core Web Vitals automatically:
+
+```javascript
+Sentry.init({
+  dsn: '__DSN__',
+  integrations: [
+    Sentry.browserTracingIntegration(),
+  ],
+});
+
+// Captured automatically:
+// - Largest Contentful Paint (LCP)
+// - First Input Delay (FID) - deprecated, replaced by INP in v10+
+// - Cumulative Layout Shift (CLS)
+// - Interaction to Next Paint (INP)
+// - Time to First Byte (TTFB)
+```
+
+### Custom Measurements
+
+Add custom performance measurements:
+
+```javascript
+import { setMeasurement, startSpan } from '@sentry/browser';
+
+startSpan({ name: 'page-load' }, () => {
+  // Custom measurement
+  setMeasurement('custom.metric', 123, 'millisecond');
+  
+  // Multiple measurements
+  setMeasurement('bundle.size', 450, 'kilobyte');
+  setMeasurement('api.calls', 5, 'none');
+});
+```
+
+## Transaction Naming
+
+### Browser Route Naming
+
+```javascript
+import { browserTracingIntegration } from '@sentry/react';
+import { useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
+
+Sentry.init({
+  dsn: '__DSN__',
+  integrations: [
+    browserTracingIntegration(),
+  ],
+});
+
+// React Router integration handles naming automatically
+```
+
+### Custom Transaction Names
+
+```javascript
+import { getActiveSpan, getRootSpan } from '@sentry/browser';
+
+// Update transaction name dynamically
+const activeSpan = getActiveSpan();
+if (activeSpan) {
+  const rootSpan = getRootSpan(activeSpan);
+  rootSpan.updateName('Custom Transaction Name');
+}
+```
+
+### Node.js Route Naming
+
+```javascript
+import express from 'express';
+
+const app = express();
+
+app.get('/users/:id', (req, res) => {
+  // Automatically named: GET /users/:id
+  res.json({ id: req.params.id });
+});
+```
+
+## Sampling Strategies
+
+### Prioritize Important Transactions
+
+```javascript
+Sentry.init({
+  dsn: '__DSN__',
+  tracesSampler: (samplingContext) => {
+    // Always sample checkout flows
+    if (samplingContext.name?.includes('/checkout')) {
+      return 1.0;
+    }
+    
+    // Sample API calls moderately
+    if (samplingContext.name?.startsWith('/api/')) {
+      return 0.2;
+    }
+    
+    // Don't sample health checks
+    if (samplingContext.name === '/health') {
+      return 0;
+    }
+    
+    // Default sampling
+    return 0.05;
+  },
+});
+```
+
+### Environment-Based Sampling
+
+```javascript
+const isProd = process.env.NODE_ENV === 'production';
+
+Sentry.init({
+  dsn: '__DSN__',
+  tracesSampleRate: isProd ? 0.05 : 1.0,
+});
+```
+
+## Performance Overhead Reduction
+
+### Disable Unnecessary Integrations
+
+```javascript
+Sentry.init({
+  dsn: '__DSN__',
+  integrations: [
+    // Only enable what you need
+    Sentry.browserTracingIntegration({
+      // Disable interaction tracking if not needed
+      traceFetch: true,
+      traceXHR: true,
+    }),
+  ],
+});
+```
+
+### Limit Breadcrumb Collection
+
+```javascript
+import { breadcrumbsIntegration } from '@sentry/browser';
+
+Sentry.init({
+  dsn: '__DSN__',
+  integrations: [
+    breadcrumbsIntegration({
+      console: false, // Disable console breadcrumbs
+      dom: true,
+      fetch: true,
+      history: true,
+      sentry: false,
+      xhr: true,
+    }),
+  ],
+  maxBreadcrumbs: 50, // Default is 100
+});
+```
+
+### Selective Instrumentation
+
+```javascript
+import { httpIntegration } from '@sentry/node';
+
+Sentry.init({
+  dsn: '__DSN__',
+  integrations: [
+    httpIntegration({
+      // Disable if you don't need HTTP spans
+      spans: false,
+    }),
+  ],
+});
+```
+
+## Framework-Specific Optimizations
+
+### React
+
+```javascript
+import * as Sentry from '@sentry/react';
+import {
+  createRoutesFromChildren,
+  matchRoutes,
+  useLocation,
+  useNavigationType,
+} from 'react-router-dom';
+
+Sentry.init({
+  dsn: '__DSN__',
+  integrations: [
+    Sentry.reactRouterV6BrowserTracingIntegration({
+      useEffect: React.useEffect,
+      useLocation,
+      useNavigationType,
+      createRoutesFromChildren,
+      matchRoutes,
+    }),
+  ],
+  tracesSampleRate: 0.1,
+});
+```
+
+### Next.js
+
+Next.js SDK handles instrumentation automatically:
+
+```javascript
+// sentry.client.config.ts
+import * as Sentry from '@sentry/nextjs';
+
+Sentry.init({
+  dsn: '__DSN__',
+  tracesSampleRate: 0.1,
+  // Browser tracing is automatic
+});
+
+// sentry.server.config.ts
+import * as Sentry from '@sentry/nextjs';
+
+Sentry.init({
+  dsn: '__DSN__',
+  tracesSampleRate: 0.1,
+  // Server instrumentation is automatic
+});
+```
+
+### Vue
+
+```javascript
+import * as Sentry from '@sentry/vue';
+
+Sentry.init({
+  app,
+  dsn: '__DSN__',
+  integrations: [
+    Sentry.browserTracingIntegration({
+      router, // Pass Vue Router instance
+    }),
+  ],
+  tracesSampleRate: 0.1,
+});
+```
+
+## Database Query Instrumentation
+
+### Prisma
+
+```javascript
+import { prismaIntegration } from '@sentry/node';
+
+Sentry.init({
+  dsn: '__DSN__',
+  integrations: [
+    prismaIntegration(),
+  ],
+});
+
+// Queries are automatically instrumented
+const users = await prisma.user.findMany();
+```
+
+### MongoDB (Mongoose)
+
+```javascript
+import { mongooseIntegration } from '@sentry/node';
+
+Sentry.init({
+  dsn: '__DSN__',
+  integrations: [
+    mongooseIntegration(),
+  ],
+});
+```
+
+## Best Practices
+
+<Accordion title="Use lower sampling rates in production">
+  High-traffic applications should use lower sample rates:
+  
+  ```javascript
+  const sampleRate = process.env.NODE_ENV === 'production' ? 0.05 : 1.0;
+  
+  Sentry.init({
+    dsn: '__DSN__',
+    tracesSampleRate: sampleRate,
+  });
+  ```
+</Accordion>
+
+<Accordion title="Don't sample health checks or metrics endpoints">
+  These create noise without value:
+  
+  ```javascript
+  tracesSampler: (context) => {
+    if (context.name?.match(/\/(health|metrics|ping)/)) {
+      return 0;
+    }
+    return 0.1;
+  }
+  ```
+</Accordion>
+
+<Accordion title="Use span operations correctly">
+  Set appropriate `op` values for better organization:
+  
+  ```javascript
+  startSpan({ name: 'db-query', op: 'db.query' }, () => {});
+  startSpan({ name: 'api-call', op: 'http.client' }, () => {});
+  startSpan({ name: 'render', op: 'ui.render' }, () => {});
+  ```
+</Accordion>
+
+<Accordion title="Avoid creating too many spans">
+  Too many spans can increase overhead. Focus on meaningful operations:
+  
+  ```javascript
+  // ❌ Too granular
+  for (const item of items) {
+    startSpan({ name: 'process-item' }, () => processItem(item));
+  }
+  
+  // ✅ Better
+  startSpan({ name: 'process-items' }, () => {
+    items.forEach(processItem);
+  });
+  ```
+</Accordion>
+
+<Accordion title="Set meaningful span attributes">
+  Add context to help debug performance issues:
+  
+  ```javascript
+  startSpan(
+    {
+      name: 'fetch-user-data',
+      op: 'http.client',
+      attributes: {
+        'http.method': 'GET',
+        'http.url': '/api/users/123',
+        'user.id': '123',
+      },
+    },
+    () => {}
+  );
+  ```
+</Accordion>
+
+## Monitoring Performance Impact
+
+### Check SDK Overhead
+
+```javascript
+const start = performance.now();
+
+// Your operation
+await myOperation();
+
+const duration = performance.now() - start;
+console.log('Operation duration:', duration);
+```
+
+### Profile Mode
+
+Enable profiling for deeper insights:
+
+```javascript
+import { browserProfilingIntegration } from '@sentry/browser';
+
+Sentry.init({
+  dsn: '__DSN__',
+  integrations: [
+    browserProfilingIntegration(),
+  ],
+  tracesSampleRate: 0.1,
+  profilesSampleRate: 0.1, // Relative to traces
+});
+```
+
+## Complete Example
+
+```javascript
+import * as Sentry from '@sentry/browser';
+import { startSpan } from '@sentry/browser';
+
+const environment = process.env.NODE_ENV;
+const isProd = environment === 'production';
+
+Sentry.init({
+  dsn: '__DSN__',
+  environment,
+  
+  integrations: [
+    Sentry.browserTracingIntegration({
+      // Customize what's traced
+      traceFetch: true,
+      traceXHR: true,
+      enableLongAnimationFrame: true,
+      
+      // Filter requests
+      shouldCreateSpanForRequest: (url) => {
+        return !url.match(/(\.png|\.jpg|analytics|ads)/);
+      },
+    }),
+  ],
+  
+  // Sampling strategy
+  tracesSampler: (context) => {
+    // Never sample health checks
+    if (context.name === '/health') return 0;
+    
+    // Always sample checkout
+    if (context.name?.includes('/checkout')) return 1.0;
+    
+    // Production: low rate
+    // Development: high rate
+    return isProd ? 0.05 : 1.0;
+  },
+  
+  // Propagate to your API
+  tracePropagationTargets: [
+    'localhost',
+    /^https:\/\/api\.myapp\.com/,
+  ],
+  
+  // Reduce breadcrumbs
+  maxBreadcrumbs: 50,
+});
+
+// Manual instrumentation example
+export async function complexOperation(userId) {
+  return await startSpan(
+    {
+      name: 'complex-operation',
+      op: 'task',
+      attributes: { 'user.id': userId },
+    },
+    async (span) => {
+      // Step 1
+      await startSpan(
+        { name: 'fetch-user', op: 'http.client' },
+        async () => {
+          const user = await fetchUser(userId);
+          span.setAttribute('user.role', user.role);
+          return user;
+        }
+      );
+      
+      // Step 2
+      await startSpan(
+        { name: 'process-data', op: 'function' },
+        async () => {
+          return await processUserData(user);
+        }
+      );
+    }
+  );
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Bundle Size Optimization" href="/guides/best-practices/bundle-size">
+    Reduce SDK bundle size impact
+  </Card>
+  <Card title="Source Maps" href="/guides/best-practices/sourcemaps">
+    Configure source maps for production
+  </Card>
+</CardGroup>

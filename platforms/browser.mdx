@@ -1,0 +1,380 @@
+---
+title: Browser SDK
+description: Monitor errors and performance in vanilla JavaScript web applications
+---
+
+The Sentry Browser SDK provides comprehensive error monitoring and performance tracking for JavaScript applications running in the browser.
+
+## Installation
+
+<CodeGroup>
+```bash npm
+npm install @sentry/browser
+```
+
+```bash yarn
+yarn add @sentry/browser
+```
+
+```bash pnpm
+pnpm add @sentry/browser
+```
+</CodeGroup>
+
+## Basic Setup
+
+Initialize Sentry as early as possible in your application, before any other code runs:
+
+```javascript
+import * as Sentry from '@sentry/browser';
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  
+  // Performance Monitoring
+  integrations: [
+    Sentry.browserTracingIntegration(),
+    Sentry.replayIntegration(),
+  ],
+  
+  // Set tracesSampleRate to 1.0 to capture 100%
+  // of transactions for performance monitoring.
+  tracesSampleRate: 1.0,
+  
+  // Capture Replay for 10% of all sessions,
+  // plus for 100% of sessions with an error
+  replaysSessionSampleRate: 0.1,
+  replaysOnErrorSampleRate: 1.0,
+});
+```
+
+## Core Features
+
+### Error Tracking
+
+Capture exceptions automatically or manually:
+
+```javascript
+// Automatic - uncaught errors are captured automatically
+throw new Error('This will be captured');
+
+// Manual capture
+try {
+  riskyOperation();
+} catch (error) {
+  Sentry.captureException(error);
+}
+
+// Capture a message
+Sentry.captureMessage('Something went wrong', 'warning');
+```
+
+### Context & Breadcrumbs
+
+Add context to understand errors better:
+
+```javascript
+// Set user information
+Sentry.setUser({
+  id: '4711',
+  email: 'user@example.com',
+  username: 'john_doe',
+});
+
+// Add custom tags
+Sentry.setTag('page_locale', 'en-US');
+Sentry.setTag('user_mode', 'admin');
+
+// Set custom context
+Sentry.setContext('character', {
+  name: 'Mighty Fighter',
+  level: 19,
+});
+
+// Add breadcrumbs
+Sentry.addBreadcrumb({
+  category: 'ui.click',
+  message: 'User clicked checkout button',
+  level: 'info',
+});
+```
+
+## Performance Monitoring
+
+### Browser Tracing
+
+Track page load performance and navigation:
+
+```javascript
+import * as Sentry from '@sentry/browser';
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  integrations: [
+    Sentry.browserTracingIntegration({
+      // Track interactions and long tasks
+      tracePropagationTargets: ['localhost', /^https:\/\/yourserver\.io\/api/],
+    }),
+  ],
+  tracesSampleRate: 1.0,
+});
+```
+
+### Custom Performance Spans
+
+Track specific operations:
+
+```javascript
+// Start a new span
+Sentry.startSpan(
+  {
+    name: 'expensive-operation',
+    op: 'function',
+  },
+  () => {
+    // Your code here
+    processLargeDataset();
+  },
+);
+
+// Manual span control
+const span = Sentry.startInactiveSpan({
+  name: 'database-query',
+  op: 'db.query',
+});
+
+performDatabaseQuery().then(() => {
+  span.end();
+});
+```
+
+## Advanced Integrations
+
+<Tabs>
+  <Tab title="Session Replay">
+    Replay user sessions to understand what happened before an error:
+
+    ```javascript
+    import * as Sentry from '@sentry/browser';
+
+    Sentry.init({
+      dsn: 'YOUR_DSN_HERE',
+      integrations: [
+        Sentry.replayIntegration({
+          // Mask all text content
+          maskAllText: true,
+          // Block all media elements
+          blockAllMedia: true,
+        }),
+      ],
+      replaysSessionSampleRate: 0.1,
+      replaysOnErrorSampleRate: 1.0,
+    });
+    ```
+  </Tab>
+
+  <Tab title="User Feedback">
+    Collect user feedback when errors occur:
+
+    ```javascript
+    import * as Sentry from '@sentry/browser';
+
+    Sentry.init({
+      dsn: 'YOUR_DSN_HERE',
+      integrations: [
+        Sentry.feedbackIntegration({
+          // Automatically show feedback form on error
+          autoInject: true,
+          colorScheme: 'light',
+        }),
+      ],
+    });
+    ```
+  </Tab>
+
+  <Tab title="Browser Profiling">
+    Profile JavaScript performance:
+
+    ```javascript
+    import * as Sentry from '@sentry/browser';
+
+    Sentry.init({
+      dsn: 'YOUR_DSN_HERE',
+      integrations: [
+        Sentry.browserProfilingIntegration(),
+      ],
+      profilesSampleRate: 1.0,
+    });
+    ```
+  </Tab>
+</Tabs>
+
+## Additional Integrations
+
+### HTTP Client Monitoring
+
+Monitor fetch and XHR requests:
+
+```javascript
+import * as Sentry from '@sentry/browser';
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  integrations: [
+    Sentry.httpClientIntegration({
+      // Track all requests
+      failedRequestStatusCodes: [[400, 599]],
+    }),
+  ],
+});
+```
+
+### Context Lines
+
+Capture source code context around errors:
+
+```javascript
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  integrations: [
+    Sentry.contextLinesIntegration(),
+  ],
+});
+```
+
+### Reporting Observer
+
+Capture browser interventions and deprecations:
+
+```javascript
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  integrations: [
+    Sentry.reportingObserverIntegration(),
+  ],
+});
+```
+
+## CDN Installation
+
+For quick setup without a bundler:
+
+```html
+<script
+  src="https://browser.sentry-cdn.com/8.0.0/bundle.min.js"
+  integrity="sha384-..."
+  crossorigin="anonymous"
+></script>
+
+<script>
+  Sentry.init({
+    dsn: 'YOUR_DSN_HERE',
+  });
+</script>
+```
+
+## Configuration Options
+
+<Accordion title="Common Configuration">
+  ```javascript
+  Sentry.init({
+    dsn: 'YOUR_DSN_HERE',
+    
+    // Environment
+    environment: 'production',
+    release: 'my-app@1.0.0',
+    
+    // Sampling
+    tracesSampleRate: 0.2,
+    replaysSessionSampleRate: 0.1,
+    
+    // Error Filtering
+    ignoreErrors: [
+      'Non-Error exception captured',
+      /^Script error\.?$/,
+    ],
+    
+    // Allowlist of URLs
+    allowUrls: [
+      /https?:\/\/(.+\.)?example\.com/,
+    ],
+    
+    // Denylist of URLs
+    denyUrls: [
+      /extensions\//i,
+      /^chrome:\/\//i,
+    ],
+    
+    // Before send hook
+    beforeSend(event, hint) {
+      // Modify or filter events
+      if (event.exception) {
+        console.log('Error captured:', hint.originalException);
+      }
+      return event;
+    },
+    
+    // Before breadcrumb hook
+    beforeBreadcrumb(breadcrumb, hint) {
+      // Filter or modify breadcrumbs
+      if (breadcrumb.category === 'ui.click') {
+        return null; // Drop the breadcrumb
+      }
+      return breadcrumb;
+    },
+  });
+  ```
+</Accordion>
+
+## Transport & Offline Support
+
+Handle offline scenarios:
+
+```javascript
+import * as Sentry from '@sentry/browser';
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  transport: Sentry.makeBrowserOfflineTransport(Sentry.makeFetchTransport),
+});
+```
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Initialize Early" icon="bolt">
+    Call `Sentry.init()` before any other JavaScript code runs to catch all errors.
+  </Card>
+  
+  <Card title="Source Maps" icon="map">
+    Upload source maps to get readable stack traces in production.
+  </Card>
+  
+  <Card title="Sampling" icon="gauge">
+    Use appropriate sample rates in production to control costs.
+  </Card>
+  
+  <Card title="Context" icon="circle-info">
+    Add user context and breadcrumbs to make errors easier to debug.
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Source Maps" icon="map" href="/sourcemaps">
+    Learn how to upload source maps
+  </Card>
+  
+  <Card title="Performance" icon="gauge-high" href="/performance">
+    Deep dive into performance monitoring
+  </Card>
+  
+  <Card title="Session Replay" icon="video" href="/session-replay">
+    Set up session replay
+  </Card>
+  
+  <Card title="User Feedback" icon="comment" href="/user-feedback">
+    Collect user feedback
+  </Card>
+</CardGroup>

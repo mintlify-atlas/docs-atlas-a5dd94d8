@@ -1,0 +1,548 @@
+---
+title: "Logs & Metrics"
+description: "Send structured logs and custom metrics to Sentry"
+---
+
+Sentry supports sending structured logs and custom metrics alongside your error and performance data, providing a complete observability solution.
+
+## Logs
+
+Sentry logs provide structured, searchable logging with automatic correlation to traces and errors.
+
+### Setup
+
+Enable logs in your SDK initialization:
+
+```javascript
+import * as Sentry from '@sentry/node';
+
+Sentry.init({
+  dsn: 'your-dsn',
+  
+  // Enable logs
+  enableLogs: true,
+  
+  // Configure log levels
+  logLevel: 'info', // minimum level to capture
+});
+```
+
+### Capturing Logs
+
+Use the logger API to send structured logs:
+
+```javascript
+import * as Sentry from '@sentry/node';
+
+// Different log levels
+Sentry.logger.trace('Detailed trace information');
+Sentry.logger.debug('Debug information', { component: 'UserService' });
+Sentry.logger.info('User logged in', { userId: '123' });
+Sentry.logger.warn('Deprecated API used', { endpoint: '/old-api' });
+Sentry.logger.error('Operation failed', { error: 'Connection timeout' });
+Sentry.logger.fatal('Critical system failure', { service: 'database' });
+```
+
+<Note>
+Logs require the `enableLogs` option to be set to `true` during initialization.
+</Note>
+
+### Log Attributes
+
+Add structured data to logs:
+
+```javascript
+Sentry.logger.info('User action', {
+  user_id: '123',
+  action: 'purchase',
+  product_id: 'prod-456',
+  amount: 99.99,
+  currency: 'USD',
+  payment_method: 'credit_card'
+});
+```
+
+### Template Strings
+
+Use template strings for structured logging:
+
+```javascript
+import * as Sentry from '@sentry/node';
+
+const userId = '123';
+const page = '/dashboard';
+
+// Parameterized log message
+Sentry.logger.info(
+  Sentry.logger.fmt`User ${userId} navigated to ${page}`,
+  {
+    userId: '123',
+    sessionId: 'abc-xyz'
+  }
+);
+```
+
+<Tip>
+Template strings allow Sentry to group similar log messages together while preserving the actual values.
+</Tip>
+
+### Log with Scope
+
+Capture logs with specific scope:
+
+```javascript
+import { getCurrentScope } from '@sentry/node';
+
+const scope = getCurrentScope();
+scope.setTag('service', 'payment');
+
+Sentry.logger.info('Payment processed', {
+  order_id: '123',
+  amount: 99.99
+}, {
+  scope // Use this specific scope
+});
+```
+
+### Log Levels
+
+- **trace**: Very detailed diagnostic information
+- **debug**: Detailed information for debugging
+- **info**: General informational messages
+- **warn**: Warning messages for potentially harmful situations
+- **error**: Error events
+- **fatal**: Very severe error events that might lead to application abort
+
+## Metrics
+
+Custom metrics help you track business and technical KPIs.
+
+### Counters
+
+Increment counters for counting events:
+
+```javascript
+import * as Sentry from '@sentry/node';
+
+// Increment by 1
+Sentry.metrics.count('api.requests', 1, {
+  attributes: {
+    endpoint: '/api/users',
+    method: 'GET',
+    status: 200
+  }
+});
+
+// Increment by custom value
+Sentry.metrics.count('items.processed', 5, {
+  attributes: {
+    processor: 'batch-1',
+    queue: 'high-priority'
+  }
+});
+```
+
+### Gauges
+
+Record current values:
+
+```javascript
+// Memory usage
+Sentry.metrics.gauge('memory.usage', 1024, {
+  unit: 'megabyte',
+  attributes: {
+    process: 'web-server',
+    region: 'us-east-1'
+  }
+});
+
+// Active connections
+Sentry.metrics.gauge('connections.active', 42, {
+  attributes: {
+    server: 'api-1',
+    protocol: 'websocket'
+  }
+});
+
+// Queue depth
+Sentry.metrics.gauge('queue.depth', 150, {
+  unit: 'item',
+  attributes: {
+    queue: 'email-notifications'
+  }
+});
+```
+
+### Distributions
+
+Record value distributions for statistical analysis:
+
+```javascript
+// Request duration
+Sentry.metrics.distribution('request.duration', 245, {
+  unit: 'millisecond',
+  attributes: {
+    endpoint: '/api/users',
+    method: 'GET'
+  }
+});
+
+// Response size
+Sentry.metrics.distribution('response.size', 1024, {
+  unit: 'byte',
+  attributes: {
+    endpoint: '/api/data',
+    compression: 'gzip'
+  }
+});
+
+// Batch size
+Sentry.metrics.distribution('batch.size', 100, {
+  attributes: {
+    processor: 'data-pipeline',
+    type: 'async'
+  }
+});
+```
+
+### Metric Units
+
+Use standard units for better visualization:
+
+```javascript
+// Time units
+Sentry.metrics.distribution('duration', 500, { unit: 'millisecond' });
+Sentry.metrics.distribution('latency', 1.5, { unit: 'second' });
+
+// Size units
+Sentry.metrics.gauge('memory', 512, { unit: 'megabyte' });
+Sentry.metrics.distribution('payload', 1024, { unit: 'byte' });
+
+// Custom units
+Sentry.metrics.gauge('temperature', 72, { unit: 'fahrenheit' });
+Sentry.metrics.count('requests', 100, { unit: 'request' });
+```
+
+## Correlation with Traces
+
+Logs and metrics are automatically correlated with active spans:
+
+```javascript
+import * as Sentry from '@sentry/node';
+
+Sentry.startSpan({ name: 'process_order', op: 'function' }, () => {
+  // Log is automatically linked to span
+  Sentry.logger.info('Processing order', { orderId: '123' });
+  
+  // Metric is linked to trace
+  Sentry.metrics.count('orders.processed', 1, {
+    attributes: { status: 'success' }
+  });
+  
+  processOrder();
+});
+```
+
+<Note>
+Logs and metrics captured within a span are automatically tagged with the trace ID and span ID.
+</Note>
+
+## Practical Examples
+
+### API Monitoring
+
+```javascript
+import * as Sentry from '@sentry/node';
+import express from 'express';
+
+const app = express();
+
+app.use((req, res, next) => {
+  const start = Date.now();
+  
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    
+    // Log request
+    Sentry.logger.info(
+      Sentry.logger.fmt`${req.method} ${req.path}`,
+      {
+        method: req.method,
+        path: req.path,
+        status: res.statusCode,
+        duration
+      }
+    );
+    
+    // Count requests
+    Sentry.metrics.count('api.requests', 1, {
+      attributes: {
+        method: req.method,
+        endpoint: req.route?.path || req.path,
+        status: res.statusCode
+      }
+    });
+    
+    // Track duration
+    Sentry.metrics.distribution('api.duration', duration, {
+      unit: 'millisecond',
+      attributes: {
+        endpoint: req.route?.path || req.path
+      }
+    });
+  });
+  
+  next();
+});
+```
+
+### Database Operations
+
+```javascript
+import * as Sentry from '@sentry/node';
+
+async function queryDatabase(sql, params) {
+  const start = Date.now();
+  
+  try {
+    const result = await db.query(sql, params);
+    const duration = Date.now() - start;
+    
+    // Log successful query
+    Sentry.logger.debug('Database query executed', {
+      query: sql,
+      rows: result.rowCount,
+      duration
+    });
+    
+    // Track query count
+    Sentry.metrics.count('db.queries', 1, {
+      attributes: {
+        operation: getOperationType(sql),
+        status: 'success'
+      }
+    });
+    
+    // Track query duration
+    Sentry.metrics.distribution('db.query.duration', duration, {
+      unit: 'millisecond',
+      attributes: {
+        operation: getOperationType(sql)
+      }
+    });
+    
+    return result;
+  } catch (error) {
+    // Log error
+    Sentry.logger.error('Database query failed', {
+      query: sql,
+      error: error.message
+    });
+    
+    // Count errors
+    Sentry.metrics.count('db.errors', 1, {
+      attributes: {
+        error_type: error.code
+      }
+    });
+    
+    throw error;
+  }
+}
+```
+
+### Business Metrics
+
+```javascript
+import * as Sentry from '@sentry/node';
+
+async function processOrder(order) {
+  Sentry.logger.info('Processing order', {
+    order_id: order.id,
+    user_id: order.userId,
+    amount: order.total
+  });
+  
+  // Count orders
+  Sentry.metrics.count('orders.processed', 1, {
+    attributes: {
+      payment_method: order.paymentMethod,
+      country: order.shippingAddress.country
+    }
+  });
+  
+  // Track order value
+  Sentry.metrics.distribution('order.value', order.total, {
+    unit: 'dollar',
+    attributes: {
+      currency: order.currency,
+      payment_method: order.paymentMethod
+    }
+  });
+  
+  // Track order items
+  Sentry.metrics.distribution('order.items', order.items.length, {
+    unit: 'item'
+  });
+  
+  await saveOrder(order);
+}
+```
+
+### Resource Monitoring
+
+```javascript
+import * as Sentry from '@sentry/node';
+import os from 'os';
+
+// Monitor system resources
+setInterval(() => {
+  const memUsage = process.memoryUsage();
+  const cpuUsage = process.cpuUsage();
+  
+  // Memory metrics
+  Sentry.metrics.gauge('memory.heap_used', memUsage.heapUsed, {
+    unit: 'byte'
+  });
+  
+  Sentry.metrics.gauge('memory.heap_total', memUsage.heapTotal, {
+    unit: 'byte'
+  });
+  
+  // CPU metrics
+  Sentry.metrics.gauge('cpu.user', cpuUsage.user, {
+    unit: 'microsecond'
+  });
+  
+  Sentry.metrics.gauge('cpu.system', cpuUsage.system, {
+    unit: 'microsecond'
+  });
+  
+  // Log if memory is high
+  if (memUsage.heapUsed / memUsage.heapTotal > 0.9) {
+    Sentry.logger.warn('High memory usage', {
+      heap_used: memUsage.heapUsed,
+      heap_total: memUsage.heapTotal,
+      percentage: Math.round((memUsage.heapUsed / memUsage.heapTotal) * 100)
+    });
+  }
+}, 60000); // Every minute
+```
+
+### Error Rate Tracking
+
+```javascript
+import * as Sentry from '@sentry/node';
+
+function trackOperationResult(operation, success) {
+  // Log the operation
+  Sentry.logger.info('Operation completed', {
+    operation,
+    success
+  });
+  
+  // Count successes and failures
+  Sentry.metrics.count('operations', 1, {
+    attributes: {
+      operation,
+      status: success ? 'success' : 'failure'
+    }
+  });
+}
+
+try {
+  await criticalOperation();
+  trackOperationResult('critical_operation', true);
+} catch (error) {
+  trackOperationResult('critical_operation', false);
+  Sentry.captureException(error);
+}
+```
+
+## Scope Integration
+
+Logs and metrics respect scope attributes:
+
+```javascript
+import { getCurrentScope } from '@sentry/node';
+
+const scope = getCurrentScope();
+scope.setAttributes({
+  service: 'api',
+  environment: 'production',
+  region: 'us-east-1'
+});
+
+// These attributes are automatically added to logs and metrics
+Sentry.logger.info('Service started');
+Sentry.metrics.gauge('service.uptime', 3600, { unit: 'second' });
+```
+
+## Best Practices
+
+### Logs
+
+1. **Use appropriate levels**: Match severity to importance
+2. **Add context**: Include relevant attributes
+3. **Use structured data**: Avoid string concatenation
+4. **Avoid sensitive data**: Don't log PII or secrets
+5. **Use templates**: For better grouping
+
+```javascript
+// Good: Structured with attributes
+Sentry.logger.info('User action', {
+  user_id: '123',
+  action: 'purchase'
+});
+
+// Bad: String concatenation
+Sentry.logger.info(`User 123 made a purchase`);
+```
+
+### Metrics
+
+1. **Choose the right type**: Counter, gauge, or distribution
+2. **Use consistent names**: Follow naming conventions
+3. **Add relevant attributes**: For filtering and grouping
+4. **Use standard units**: For better visualization
+5. **Don't over-instrument**: Focus on meaningful metrics
+
+```javascript
+// Good: Clear name, appropriate type, useful attributes
+Sentry.metrics.distribution('api.response_time', duration, {
+  unit: 'millisecond',
+  attributes: {
+    endpoint: '/api/users',
+    method: 'GET'
+  }
+});
+
+// Bad: Vague name, no attributes
+Sentry.metrics.gauge('time', duration);
+```
+
+## Viewing Logs and Metrics
+
+In Sentry:
+
+1. **Logs Explorer**: Search and filter logs
+2. **Metrics Dashboard**: Visualize custom metrics
+3. **Trace View**: See logs/metrics within traces
+4. **Correlation**: Link logs/metrics to errors
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Performance" icon="gauge" href="/core/performance">
+    Monitor application performance
+  </Card>
+  <Card title="Tracing" icon="route" href="/core/tracing">
+    Correlate logs with traces
+  </Card>
+  <Card title="Error Monitoring" icon="bug" href="/core/error-monitoring">
+    Link errors with logs
+  </Card>
+  <Card title="Scopes" icon="layer-group" href="/core/scopes">
+    Manage scope attributes
+  </Card>
+</CardGroup>

@@ -1,0 +1,453 @@
+---
+title: 'LangChain Integration'
+description: 'Automatic instrumentation for LangChain applications'
+---
+
+The LangChain integration automatically instruments LangChain applications by injecting Sentry callback handlers into all runnable instances.
+
+## Installation
+
+The integration is **enabled by default** in Node.js:
+
+```javascript
+import * as Sentry from '@sentry/node';
+
+Sentry.init({
+  dsn: 'your-dsn',
+  // langChainIntegration is included by default
+});
+```
+
+## Basic Usage
+
+Just use LangChain normally:
+
+```javascript
+import { ChatOpenAI } from '@langchain/openai';
+
+const model = new ChatOpenAI({
+  modelName: 'gpt-4',
+});
+
+// Automatically instrumented
+const response = await model.invoke('What is the capital of France?');
+```
+
+## Configuration
+
+### Default Behavior
+
+By default, inputs and outputs are **not captured**:
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  sendDefaultPii: false, // Default: no inputs/outputs
+});
+```
+
+### Capture Inputs and Outputs
+
+<Tabs>
+  <Tab title="Global Setting">
+    Enable for all AI integrations:
+
+    ```javascript
+    Sentry.init({
+      dsn: 'your-dsn',
+      sendDefaultPii: true, // Captures all inputs/outputs
+    });
+    ```
+  </Tab>
+  
+  <Tab title="LangChain Only">
+    Enable only for LangChain:
+
+    ```javascript
+    Sentry.init({
+      dsn: 'your-dsn',
+      sendDefaultPii: false,
+      integrations: [
+        Sentry.langChainIntegration({
+          recordInputs: true,
+          recordOutputs: true,
+        }),
+      ],
+    });
+    ```
+  </Tab>
+</Tabs>
+
+## Integration Options
+
+<ParamField path="recordInputs" type="boolean" default="sendDefaultPii">
+  Capture input messages and prompts
+</ParamField>
+
+<ParamField path="recordOutputs" type="boolean" default="sendDefaultPii">
+  Capture responses and outputs
+</ParamField>
+
+## Automatic Instrumentation
+
+The integration automatically instruments:
+
+### LLM and Chat Models
+
+```javascript
+import { ChatOpenAI } from '@langchain/openai';
+import { ChatAnthropic } from '@langchain/anthropic';
+
+const openai = new ChatOpenAI();
+const anthropic = new ChatAnthropic();
+
+// Both automatically tracked
+await openai.invoke('Hello!');
+await anthropic.invoke('Hello!');
+```
+
+### Chains
+
+```javascript
+import { ChatOpenAI } from '@langchain/openai';
+import { PromptTemplate } from '@langchain/core/prompts';
+
+const model = new ChatOpenAI();
+const prompt = PromptTemplate.fromTemplate(
+  'Tell me a joke about {topic}'
+);
+
+const chain = prompt.pipe(model);
+
+// Chain execution tracked
+const response = await chain.invoke({ topic: 'programming' });
+```
+
+### Tools
+
+```javascript
+import { DynamicTool } from '@langchain/core/tools';
+
+const weatherTool = new DynamicTool({
+  name: 'get_weather',
+  description: 'Get the current weather',
+  func: async (location) => {
+    return `Weather in ${location}: Sunny, 72°F`;
+  },
+});
+
+// Tool execution tracked
+await weatherTool.invoke({ location: 'San Francisco' });
+```
+
+## Captured Events
+
+The integration captures these LangChain lifecycle events:
+
+<Steps>
+  <Step title="LLM/Chat Start">
+    When a language model call begins
+  </Step>
+  
+  <Step title="LLM/Chat End">
+    When a language model call completes
+  </Step>
+  
+  <Step title="LLM/Chat Error">
+    When a language model call fails
+  </Step>
+  
+  <Step title="Chain Start">
+    When a chain execution begins
+  </Step>
+  
+  <Step title="Chain End">
+    When a chain execution completes
+  </Step>
+  
+  <Step title="Chain Error">
+    When a chain execution fails
+  </Step>
+  
+  <Step title="Tool Start">
+    When a tool is invoked
+  </Step>
+  
+  <Step title="Tool End">
+    When a tool execution completes
+  </Step>
+  
+  <Step title="Tool Error">
+    When a tool execution fails
+  </Step>
+</Steps>
+
+## Manual Callback Handler
+
+You can also manually add the Sentry callback handler:
+
+```javascript
+import * as Sentry from '@sentry/node';
+import { ChatOpenAI } from '@langchain/openai';
+
+const sentryHandler = Sentry.createLangChainCallbackHandler({
+  recordInputs: true,
+  recordOutputs: true,
+});
+
+const model = new ChatOpenAI();
+const response = await model.invoke(
+  'What is AI?',
+  { callbacks: [sentryHandler, myOtherCallback] }
+);
+```
+
+## Practical Examples
+
+### Question Answering Chain
+
+```javascript
+import * as Sentry from '@sentry/node';
+import { ChatOpenAI } from '@langchain/openai';
+import { PromptTemplate } from '@langchain/core/prompts';
+import { StringOutputParser } from '@langchain/core/output_parsers';
+
+const model = new ChatOpenAI({ modelName: 'gpt-4' });
+
+const prompt = PromptTemplate.fromTemplate(`
+Answer the following question based on the context:
+
+Context: {context}
+
+Question: {question}
+
+Answer:
+`);
+
+const chain = prompt.pipe(model).pipe(new StringOutputParser());
+
+// Automatically tracked in Sentry
+const answer = await chain.invoke({
+  context: 'Paris is the capital of France.',
+  question: 'What is the capital of France?',
+});
+```
+
+### RAG (Retrieval-Augmented Generation)
+
+```javascript
+import { ChatOpenAI } from '@langchain/openai';
+import { OpenAIEmbeddings } from '@langchain/openai';
+import { MemoryVectorStore } from 'langchain/vectorstores/memory';
+import { createRetrievalChain } from 'langchain/chains/retrieval';
+import { createStuffDocumentsChain } from 'langchain/chains/combine_documents';
+
+const embeddings = new OpenAIEmbeddings();
+const vectorStore = await MemoryVectorStore.fromTexts(
+  ['Paris is the capital of France', 'Berlin is the capital of Germany'],
+  [{ source: 'doc1' }, { source: 'doc2' }],
+  embeddings
+);
+
+const model = new ChatOpenAI();
+const combineDocsChain = await createStuffDocumentsChain({ llm: model });
+const retrievalChain = await createRetrievalChain({
+  retriever: vectorStore.asRetriever(),
+  combineDocsChain,
+});
+
+// Full RAG pipeline tracked
+const response = await retrievalChain.invoke({
+  input: 'What is the capital of France?',
+});
+```
+
+### Agent with Tools
+
+```javascript
+import { ChatOpenAI } from '@langchain/openai';
+import { DynamicTool } from '@langchain/core/tools';
+import { createToolCallingAgent, AgentExecutor } from 'langchain/agents';
+import { ChatPromptTemplate } from '@langchain/core/prompts';
+
+const model = new ChatOpenAI({
+  modelName: 'gpt-4',
+  temperature: 0,
+});
+
+const tools = [
+  new DynamicTool({
+    name: 'calculator',
+    description: 'Performs basic math operations',
+    func: async (input) => {
+      return eval(input).toString();
+    },
+  }),
+  new DynamicTool({
+    name: 'weather',
+    description: 'Gets current weather',
+    func: async (location) => {
+      return `Weather in ${location}: Sunny`;
+    },
+  }),
+];
+
+const prompt = ChatPromptTemplate.fromMessages([
+  ['system', 'You are a helpful assistant'],
+  ['human', '{input}'],
+  ['placeholder', '{agent_scratchpad}'],
+]);
+
+const agent = await createToolCallingAgent({ llm: model, tools, prompt });
+const executor = new AgentExecutor({ agent, tools });
+
+// Agent execution and tool calls tracked
+const result = await executor.invoke({
+  input: 'What is 25 * 4 and what is the weather in Paris?',
+});
+```
+
+### Streaming Responses
+
+```javascript
+import { ChatOpenAI } from '@langchain/openai';
+
+const model = new ChatOpenAI({
+  streaming: true,
+});
+
+// Streaming tracked with final response
+const stream = await model.stream('Tell me a story');
+
+for await (const chunk of stream) {
+  process.stdout.write(chunk.content);
+}
+```
+
+## Provider Integration
+
+<Warning>
+  LangChain automatically disables OpenAI, Anthropic, and Google GenAI integrations to prevent duplicate spans.
+</Warning>
+
+When using LangChain, provider integrations are skipped:
+
+```javascript
+import { ChatOpenAI } from '@langchain/openai';
+import { ChatAnthropic } from '@langchain/anthropic';
+
+// Only LangChain spans are created (no OpenAI/Anthropic duplicates)
+const openai = new ChatOpenAI();
+await openai.invoke('Hello');
+
+const anthropic = new ChatAnthropic();
+await anthropic.invoke('Hello');
+```
+
+Direct SDK usage still creates provider spans:
+
+```javascript
+import OpenAI from 'openai';
+import { ChatOpenAI } from '@langchain/openai';
+
+const openai = new OpenAI();
+const langchainModel = new ChatOpenAI();
+
+// Creates OpenAI span
+await openai.chat.completions.create({...});
+
+// Creates LangChain span
+await langchainModel.invoke('Hello');
+```
+
+## Viewing LangChain Data
+
+LangChain operations appear as spans in traces:
+
+```
+Transaction: POST /api/chat
+├─ langchain.chain.start
+│  ├─ langchain.llm.start (OpenAI GPT-4)
+│  │  └─ Duration: 2.1s
+│  ├─ langchain.tool.start (calculator)
+│  │  └─ Duration: 15ms
+│  └─ Duration: 2.5s
+└─ Total: 2.5s
+```
+
+## Performance Monitoring
+
+- **Chain Execution Time**: Track complex workflow performance
+- **LLM Latency**: Monitor model response times
+- **Tool Performance**: Identify slow tool executions
+- **Error Rates**: Track failures in chains and tools
+
+## Source Code
+
+The LangChain integration is implemented in:
+
+`packages/node/src/integrations/tracing/langchain/index.ts:11`
+
+## Privacy Best Practices
+
+<Tip>
+  Use `recordInputs` and `recordOutputs` selectively based on data sensitivity.
+</Tip>
+
+### Filter Sensitive Prompts
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  sendDefaultPii: true,
+  
+  beforeSendSpan(span) {
+    // Remove sensitive data from LangChain spans
+    if (span.op?.startsWith('langchain')) {
+      const attributes = span.attributes || {};
+      for (const key in attributes) {
+        if (key.includes('input') || key.includes('prompt')) {
+          attributes[key] = '[Filtered]';
+        }
+      }
+    }
+    return span;
+  },
+});
+```
+
+## Troubleshooting
+
+### Spans Not Appearing
+
+Ensure tracing is enabled:
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  tracesSampleRate: 1.0,
+});
+```
+
+### Duplicate Spans
+
+If you see duplicate spans, ensure you're not manually instrumenting providers that LangChain already handles.
+
+### Custom Callbacks
+
+To use custom callbacks alongside Sentry:
+
+```javascript
+const sentryHandler = Sentry.createLangChainCallbackHandler();
+const myHandler = new MyCustomHandler();
+
+await model.invoke('Hello', {
+  callbacks: [sentryHandler, myHandler],
+});
+```
+
+## Related
+
+- [AI Monitoring Overview](/integrations/ai/overview)
+- [LangGraph Integration](/integrations/ai/langgraph)
+- [OpenAI Integration](/integrations/ai/openai)

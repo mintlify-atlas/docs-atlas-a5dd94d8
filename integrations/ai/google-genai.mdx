@@ -1,0 +1,479 @@
+---
+title: 'Google GenAI Integration'
+description: 'Monitor Google Generative AI API calls including Gemini models'
+---
+
+The Google GenAI integration automatically instruments Google Generative AI SDK calls to capture performance data and errors for Gemini and other Google AI models.
+
+## Installation
+
+The integration is **enabled by default** in Node.js:
+
+```javascript
+import * as Sentry from '@sentry/node';
+
+Sentry.init({
+  dsn: 'your-dsn',
+  // googleGenAiIntegration is included by default
+});
+```
+
+## Basic Usage
+
+Just use the Google GenAI SDK normally:
+
+```javascript
+import { GoogleGenerativeAI } from '@google/generative-ai';
+
+const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
+const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
+
+// Automatically instrumented
+const result = await model.generateContent('What is the capital of France?');
+const response = result.response;
+const text = response.text();
+```
+
+## Configuration
+
+### Default Behavior
+
+By default, prompts and responses are **not captured**:
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  sendDefaultPii: false, // Default: no prompts/responses
+});
+```
+
+### Capture Prompts and Responses
+
+<Tabs>
+  <Tab title="Global Setting">
+    Enable for all AI integrations:
+
+    ```javascript
+    Sentry.init({
+      dsn: 'your-dsn',
+      sendDefaultPii: true, // Captures all inputs/outputs
+    });
+    ```
+  </Tab>
+  
+  <Tab title="Google GenAI Only">
+    Enable only for Google GenAI:
+
+    ```javascript
+    Sentry.init({
+      dsn: 'your-dsn',
+      sendDefaultPii: false,
+      integrations: [
+        Sentry.googleGenAiIntegration({
+          recordInputs: true,
+          recordOutputs: true,
+        }),
+      ],
+    });
+    ```
+  </Tab>
+</Tabs>
+
+## Integration Options
+
+<ParamField path="recordInputs" type="boolean" default="sendDefaultPii">
+  Capture prompt messages
+</ParamField>
+
+<ParamField path="recordOutputs" type="boolean" default="sendDefaultPii">
+  Capture completion responses
+</ParamField>
+
+## Captured Data
+
+### Always Captured
+
+These attributes are always included:
+
+```javascript
+{
+  'gen_ai.operation.name': 'chat',
+  'gen_ai.request.model': 'gemini-pro',
+  'gen_ai.system': 'google_genai',
+  'gen_ai.usage.input_tokens': 15,
+  'gen_ai.usage.output_tokens': 88,
+  'gen_ai.response.finish_reasons': ['STOP'],
+}
+```
+
+### When `recordInputs: true`
+
+Prompt content is captured:
+
+```javascript
+{
+  'gen_ai.prompt.0.content': 'What is the capital of France?',
+}
+```
+
+### When `recordOutputs: true`
+
+Completion responses are captured:
+
+```javascript
+{
+  'gen_ai.completion.0.content': 'The capital of France is Paris.',
+  'gen_ai.completion.0.finish_reason': 'STOP',
+}
+```
+
+## Supported Operations
+
+### Text Generation
+
+```javascript
+const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
+
+const result = await model.generateContent(
+  'Explain quantum computing in simple terms'
+);
+
+console.log(result.response.text());
+// Span: gen_ai.chat.completions
+```
+
+### Streaming Content
+
+```javascript
+const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
+
+const result = await model.generateContentStream(
+  'Tell me a long story'
+);
+
+for await (const chunk of result.stream) {
+  const chunkText = chunk.text();
+  process.stdout.write(chunkText);
+}
+// Span includes full streaming response
+```
+
+### Chat Conversations
+
+```javascript
+const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
+const chat = model.startChat({
+  history: [
+    {
+      role: 'user',
+      parts: [{ text: 'Hello' }],
+    },
+    {
+      role: 'model',
+      parts: [{ text: 'Great to meet you. What would you like to know?' }],
+    },
+  ],
+});
+
+const result = await chat.sendMessage('What is AI?');
+console.log(result.response.text());
+// Each message creates a span
+```
+
+### Multimodal Generation
+
+```javascript
+import fs from 'fs';
+
+const model = genAI.getGenerativeModel({ model: 'gemini-pro-vision' });
+
+const imagePart = {
+  inlineData: {
+    data: fs.readFileSync('image.jpg').toString('base64'),
+    mimeType: 'image/jpeg',
+  },
+};
+
+const result = await model.generateContent([
+  'What is in this image?',
+  imagePart,
+]);
+
+console.log(result.response.text());
+// Span captures multimodal request
+```
+
+### Embeddings
+
+```javascript
+const model = genAI.getGenerativeModel({ model: 'embedding-001' });
+
+const result = await model.embedContent('Your text here');
+console.log(result.embedding);
+// Span: gen_ai.embeddings.create
+```
+
+## Practical Examples
+
+### Content Summarization
+
+```javascript
+import * as Sentry from '@sentry/node';
+import { GoogleGenerativeAI } from '@google/generative-ai';
+
+const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
+
+async function summarizeArticle(articleText) {
+  return await Sentry.startSpan(
+    {
+      name: 'Summarize Article',
+      op: 'ai.summarization',
+      attributes: {
+        'content.length': articleText.length,
+      },
+    },
+    async () => {
+      const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
+      
+      const result = await model.generateContent([
+        'Please provide a concise summary of the following article:',
+        articleText,
+      ]);
+      
+      return result.response.text();
+    }
+  );
+}
+```
+
+### Question Answering Bot
+
+```javascript
+const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
+const chat = model.startChat();
+
+async function askQuestion(question) {
+  return await Sentry.startSpan(
+    {
+      name: 'Answer Question',
+      op: 'ai.qa',
+    },
+    async () => {
+      const result = await chat.sendMessage(question);
+      return result.response.text();
+    }
+  );
+}
+
+// Usage
+await askQuestion('What is machine learning?');
+await askQuestion('Can you give me an example?');
+// Each question is tracked separately
+```
+
+### Image Analysis
+
+```javascript
+import fs from 'fs';
+
+async function analyzeImage(imagePath) {
+  return await Sentry.startSpan(
+    {
+      name: 'Analyze Image',
+      op: 'ai.vision',
+    },
+    async () => {
+      const model = genAI.getGenerativeModel({ model: 'gemini-pro-vision' });
+      
+      const imageData = fs.readFileSync(imagePath).toString('base64');
+      const imagePart = {
+        inlineData: {
+          data: imageData,
+          mimeType: 'image/jpeg',
+        },
+      };
+      
+      const result = await model.generateContent([
+        'Describe what you see in this image in detail.',
+        imagePart,
+      ]);
+      
+      return result.response.text();
+    }
+  );
+}
+```
+
+### Code Generation
+
+```javascript
+async function generateCode(description, language) {
+  return await Sentry.startSpan(
+    {
+      name: 'Generate Code',
+      op: 'ai.code_generation',
+      attributes: {
+        'code.language': language,
+      },
+    },
+    async () => {
+      const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
+      
+      const prompt = `Generate ${language} code for: ${description}\n\nProvide only the code without explanations.`;
+      
+      const result = await model.generateContent(prompt);
+      return result.response.text();
+    }
+  );
+}
+
+// Usage
+const code = await generateCode(
+  'a function that calculates fibonacci numbers',
+  'Python'
+);
+```
+
+### Semantic Search
+
+```javascript
+async function findSimilarDocuments(query, documents) {
+  return await Sentry.startSpan(
+    {
+      name: 'Semantic Search',
+      op: 'ai.search',
+      attributes: {
+        'search.documents': documents.length,
+      },
+    },
+    async () => {
+      const model = genAI.getGenerativeModel({ model: 'embedding-001' });
+      
+      // Get query embedding
+      const queryResult = await model.embedContent(query);
+      const queryEmbedding = queryResult.embedding;
+      
+      // Get document embeddings
+      const docEmbeddings = await Promise.all(
+        documents.map(async (doc) => {
+          const result = await model.embedContent(doc.text);
+          return {
+            ...doc,
+            embedding: result.embedding,
+          };
+        })
+      );
+      
+      // Calculate similarity and return top results
+      const results = docEmbeddings
+        .map(doc => ({
+          ...doc,
+          similarity: cosineSimilarity(queryEmbedding, doc.embedding),
+        }))
+        .sort((a, b) => b.similarity - a.similarity)
+        .slice(0, 5);
+      
+      return results;
+    }
+  );
+}
+```
+
+## Model Support
+
+The integration supports all Gemini models:
+
+- **Gemini Pro**: `gemini-pro` - Text generation
+- **Gemini Pro Vision**: `gemini-pro-vision` - Multimodal (text + images)
+- **Gemini Ultra**: `gemini-ultra` - Most capable model
+- **Embeddings**: `embedding-001` - Text embeddings
+
+## Safety Settings
+
+Configure content safety:
+
+```javascript
+import { HarmBlockThreshold, HarmCategory } from '@google/generative-ai';
+
+const model = genAI.getGenerativeModel({
+  model: 'gemini-pro',
+  safetySettings: [
+    {
+      category: HarmCategory.HARM_CATEGORY_HARASSMENT,
+      threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+    },
+  ],
+});
+
+const result = await model.generateContent('Your prompt');
+// Safety settings captured in span metadata
+```
+
+## Performance Monitoring
+
+Track Gemini performance metrics:
+
+- **Response Times**: API latency per model
+- **Token Usage**: Input and output tokens
+- **Safety Blocks**: Track content filtering
+- **Error Rates**: Rate limits and API errors
+
+## Source Code
+
+The Google GenAI integration is implemented in:
+
+`packages/node/src/integrations/tracing/google-genai/index.ts:11`
+
+## Privacy Best Practices
+
+<Warning>
+  Be mindful of sensitive data in prompts, especially with multimodal inputs.
+</Warning>
+
+### Filter Sensitive Content
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  sendDefaultPii: true,
+  
+  beforeSendSpan(span) {
+    // Remove image data from spans
+    const attributes = span.attributes || {};
+    for (const key in attributes) {
+      if (key.includes('image') || key.includes('inlineData')) {
+        delete attributes[key];
+      }
+    }
+    
+    return span;
+  },
+});
+```
+
+## Troubleshooting
+
+### Spans Not Appearing
+
+Ensure tracing is enabled:
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  tracesSampleRate: 1.0,
+});
+```
+
+### Streaming Not Captured
+
+Streaming responses are fully captured. Token counts appear after the stream completes.
+
+### Multimodal Content
+
+Image data is not captured in spans to reduce payload size. Only text prompts and responses are captured.
+
+## Related
+
+- [AI Monitoring Overview](/integrations/ai/overview)
+- [OpenAI Integration](/integrations/ai/openai)
+- [Anthropic Integration](/integrations/ai/anthropic)

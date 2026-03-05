@@ -1,0 +1,548 @@
+---
+title: 'Node.js Installation'
+description: 'Install and configure the Sentry SDK for Node.js applications'
+---
+
+The `@sentry/node` package provides error tracking and performance monitoring for Node.js applications using OpenTelemetry for automatic instrumentation.
+
+## Prerequisites
+
+- Node.js 18 or newer
+- A Sentry account and project DSN
+
+## Installation
+
+<Steps>
+  <Step title="Install the Package">
+    Install `@sentry/node` using your preferred package manager:
+
+    <CodeGroup>
+    ```bash npm
+    npm install @sentry/node
+    ```
+
+    ```bash yarn
+    yarn add @sentry/node
+    ```
+
+    ```bash pnpm
+    pnpm add @sentry/node
+    ```
+    </CodeGroup>
+
+    **Current Version:** 10.42.0
+  </Step>
+
+  <Step title="Create Instrumentation File">
+    Create a file named `instrument.js` (or `instrument.mjs` for ESM) that initializes Sentry. This file must be imported **before** any other modules:
+
+    <CodeGroup>
+    ```javascript CommonJS
+    // instrument.js
+    const Sentry = require('@sentry/node');
+
+    Sentry.init({
+      dsn: 'YOUR_DSN_HERE',
+      
+      // Set tracesSampleRate to 1.0 to capture 100%
+      // of transactions for tracing
+      tracesSampleRate: 1.0,
+    });
+    ```
+
+    ```javascript ESM
+    // instrument.mjs
+    import * as Sentry from '@sentry/node';
+
+    Sentry.init({
+      dsn: 'YOUR_DSN_HERE',
+      
+      // Set tracesSampleRate to 1.0 to capture 100%
+      // of transactions for tracing
+      tracesSampleRate: 1.0,
+    });
+    ```
+    </CodeGroup>
+
+    <Warning>
+      You **must** call `Sentry.init()` before requiring/importing any other modules. This ensures that Sentry can automatically instrument all modules in your application.
+    </Warning>
+  </Step>
+
+  <Step title="Import Instrumentation in Your Application">
+    Import the instrumentation file as the **first** import in your application:
+
+    <CodeGroup>
+    ```javascript CommonJS
+    // app.js
+    // Import this first!
+    require('./instrument');
+
+    // Now import other modules
+    const express = require('express');
+    const http = require('http');
+
+    // Your application code
+    const app = express();
+    // ...
+    ```
+
+    ```javascript ESM
+    // app.mjs
+    // Import this first!
+    import './instrument.mjs';
+
+    // Now import other modules
+    import express from 'express';
+    import http from 'http';
+
+    // Your application code
+    const app = express();
+    // ...
+    ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="ESM: Use --import Flag (Recommended)">
+    For ESM applications, use Node.js's `--import` flag to ensure Sentry loads before your application:
+
+    ```bash
+    # Node.js 18.19.0 and newer
+    node --import ./instrument.mjs app.mjs
+    ```
+
+    Or set it via environment variable:
+
+    ```bash
+    NODE_OPTIONS="--import ./instrument.mjs" npm run start
+    ```
+
+    <Tip>
+      Using `--import` ensures that Sentry is initialized before any application code runs, providing the most complete instrumentation.
+    </Tip>
+  </Step>
+
+  <Step title="Verify Installation">
+    Test that Sentry is working:
+
+    ```javascript
+    import * as Sentry from '@sentry/node';
+
+    // This will create an error and send it to Sentry
+    Sentry.captureException(new Error('Test error'));
+
+    // Flush events before the application exits
+    await Sentry.flush(2000);
+    ```
+
+    Check your Sentry dashboard to see the error.
+  </Step>
+</Steps>
+
+## Automatic Instrumentation
+
+The Node.js SDK uses OpenTelemetry to automatically instrument popular frameworks and libraries:
+
+- **HTTP/HTTPS**: `http`, `https`, `node-fetch`, `undici`
+- **Databases**: PostgreSQL, MySQL, MySQL2, MongoDB, Mongoose, Redis, Prisma
+- **Frameworks**: Express, Fastify, Koa, Hapi, Connect, NestJS
+- **GraphQL**: GraphQL server instrumentation
+- **Message Queues**: Kafka, AMQP
+- **Other**: Knex, Tedious, Generic Pool, Dataloader
+
+<Note>
+  All automatic instrumentation happens when you call `Sentry.init()` before importing other modules. No additional configuration is required.
+</Note>
+
+## Framework Integrations
+
+### Express
+
+```javascript
+import express from 'express';
+import * as Sentry from '@sentry/node';
+
+const app = express();
+
+// Request handler must be the first middleware
+app.use(Sentry.expressIntegration());
+
+// Your routes
+app.get('/', (req, res) => {
+  res.send('Hello World!');
+});
+
+// Error handler must be before any other error middleware
+app.use(Sentry.expressErrorHandler());
+
+// Optional fallthrough error handler
+app.use((err, req, res, next) => {
+  res.statusCode = 500;
+  res.end('Internal Server Error');
+});
+
+app.listen(3000);
+```
+
+### Fastify
+
+```javascript
+import Fastify from 'fastify';
+import * as Sentry from '@sentry/node';
+
+const fastify = Fastify();
+
+// Register Sentry plugin
+await fastify.register(Sentry.fastifyIntegration());
+
+// Set up error handler
+await Sentry.setupFastifyErrorHandler(fastify);
+
+fastify.get('/', async (request, reply) => {
+  return { hello: 'world' };
+});
+
+fastify.listen({ port: 3000 });
+```
+
+### Koa
+
+```javascript
+import Koa from 'koa';
+import * as Sentry from '@sentry/node';
+
+const app = new Koa();
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  integrations: [Sentry.koaIntegration()],
+});
+
+app.use(Sentry.setupKoaErrorHandler(app));
+
+app.use(async (ctx) => {
+  ctx.body = 'Hello World';
+});
+
+app.listen(3000);
+```
+
+### Hapi
+
+```javascript
+import Hapi from '@hapi/hapi';
+import * as Sentry from '@sentry/node';
+
+const server = Hapi.server({
+  port: 3000,
+});
+
+// Register Sentry plugin
+await server.register(Sentry.hapiIntegration());
+await Sentry.setupHapiErrorHandler(server);
+
+server.route({
+  method: 'GET',
+  path: '/',
+  handler: (request, h) => {
+    return 'Hello World!';
+  },
+});
+
+await server.start();
+```
+
+## Database Integrations
+
+### Prisma
+
+```javascript
+import { PrismaClient } from '@prisma/client';
+import * as Sentry from '@sentry/node';
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  integrations: [Sentry.prismaIntegration()],
+});
+
+const prisma = new PrismaClient();
+```
+
+### MongoDB
+
+```javascript
+import { MongoClient } from 'mongodb';
+import * as Sentry from '@sentry/node';
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  integrations: [Sentry.mongoIntegration()],
+});
+
+// MongoDB will be automatically instrumented
+const client = new MongoClient(url);
+```
+
+### PostgreSQL
+
+```javascript
+import pg from 'pg';
+import * as Sentry from '@sentry/node';
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  integrations: [Sentry.postgresIntegration()],
+});
+
+const client = new pg.Client();
+await client.connect();
+```
+
+## Usage
+
+### Capturing Errors
+
+```javascript
+import * as Sentry from '@sentry/node';
+
+try {
+  someFunctionThatMightFail();
+} catch (error) {
+  Sentry.captureException(error);
+}
+```
+
+### Capturing Messages
+
+```javascript
+import * as Sentry from '@sentry/node';
+
+Sentry.captureMessage('Something went wrong!', 'warning');
+```
+
+### Setting Context
+
+```javascript
+import * as Sentry from '@sentry/node';
+
+// Set user
+Sentry.setUser({ 
+  id: '123',
+  email: 'user@example.com' 
+});
+
+// Set tags
+Sentry.setTag('service', 'api');
+Sentry.setTag('environment', 'production');
+
+// Set extra context
+Sentry.setExtra('requestId', req.id);
+Sentry.setContext('server', {
+  hostname: os.hostname(),
+  pid: process.pid,
+});
+```
+
+### Custom Spans
+
+Create custom performance spans:
+
+```javascript
+import * as Sentry from '@sentry/node';
+
+const result = await Sentry.startSpan(
+  {
+    name: 'expensive-operation',
+    op: 'function',
+  },
+  async () => {
+    // Your expensive operation
+    return await doSomethingExpensive();
+  }
+);
+```
+
+### Cron Monitoring
+
+Monitor scheduled jobs:
+
+```javascript
+import * as Sentry from '@sentry/node';
+
+const checkInId = Sentry.captureCheckIn({
+  monitorSlug: 'daily-backup',
+  status: 'in_progress',
+});
+
+try {
+  await performBackup();
+  
+  Sentry.captureCheckIn({
+    checkInId,
+    monitorSlug: 'daily-backup',
+    status: 'ok',
+  });
+} catch (error) {
+  Sentry.captureCheckIn({
+    checkInId,
+    monitorSlug: 'daily-backup',
+    status: 'error',
+  });
+}
+```
+
+Or use the `withMonitor` helper:
+
+```javascript
+import * as Sentry from '@sentry/node';
+
+const result = await Sentry.withMonitor(
+  'daily-backup',
+  async () => {
+    return await performBackup();
+  }
+);
+```
+
+## Advanced Configuration
+
+### Environment and Release
+
+```javascript
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  environment: process.env.NODE_ENV,
+  release: process.env.RELEASE_VERSION,
+});
+```
+
+### Sampling
+
+```javascript
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  
+  // Traces sampling
+  tracesSampleRate: 0.2, // 20% of transactions
+  
+  // Or use dynamic sampling
+  tracesSampler: (samplingContext) => {
+    // Sample based on the context
+    if (samplingContext.transactionContext.name.includes('/health')) {
+      return 0; // Don't trace health checks
+    }
+    return 0.5; // 50% for everything else
+  },
+});
+```
+
+### Filtering Events
+
+```javascript
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  
+  beforeSend(event, hint) {
+    // Don't send errors from specific modules
+    if (event.exception?.values?.[0]?.stacktrace?.frames?.some(
+      frame => frame.filename?.includes('node_modules')
+    )) {
+      return null;
+    }
+    return event;
+  },
+});
+```
+
+### Integrations
+
+```javascript
+import * as Sentry from '@sentry/node';
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  
+  integrations: [
+    // HTTP instrumentation
+    Sentry.httpIntegration(),
+    
+    // Database integrations
+    Sentry.prismaIntegration(),
+    Sentry.mongoIntegration(),
+    Sentry.postgresIntegration(),
+    
+    // Framework integrations  
+    Sentry.expressIntegration(),
+    
+    // Console integration
+    Sentry.captureConsoleIntegration({
+      levels: ['error'],
+    }),
+  ],
+});
+```
+
+## Troubleshooting
+
+### Missing Traces
+
+If you're not seeing traces:
+
+1. Ensure `Sentry.init()` is called **before** importing other modules
+2. Check that `tracesSampleRate` is set to a value greater than 0
+3. For ESM, use the `--import` flag
+
+### Duplicate Errors
+
+If you're seeing duplicate errors, make sure you're not:
+
+- Calling `Sentry.init()` multiple times
+- Manually capturing errors that are automatically captured
+- Using multiple error handlers that both report to Sentry
+
+### Source Maps
+
+For TypeScript or transpiled code:
+
+1. Enable source maps in your `tsconfig.json`:
+   ```json
+   {
+     "compilerOptions": {
+       "sourceMap": true
+     }
+   }
+   ```
+
+2. Use `Sentry.rewriteFramesIntegration()` to map stack traces:
+   ```javascript
+   Sentry.init({
+     dsn: 'YOUR_DSN_HERE',
+     integrations: [
+       Sentry.rewriteFramesIntegration({
+         root: process.cwd(),
+       }),
+     ],
+   });
+   ```
+
+<Warning>
+  Remember to flush events before your application exits, especially in serverless environments:
+  
+  ```javascript
+  await Sentry.flush(2000);
+  process.exit();
+  ```
+</Warning>
+
+## Next Steps
+
+- Configure [Performance Monitoring](/essentials/performance-monitoring)
+- Set up [Cron Monitoring](/essentials/cron-monitoring)
+- Learn about [Distributed Tracing](/essentials/distributed-tracing)
+- Explore [Custom Instrumentation](/essentials/custom-instrumentation)
+
+## Related Documentation
+
+- [Official Node.js SDK Docs](https://docs.sentry.io/platforms/javascript/guides/node/)
+- [Sentry Node Package on npm](https://www.npmjs.com/package/@sentry/node)
+- [Source Code on GitHub](https://github.com/getsentry/sentry-javascript/tree/master/packages/node)

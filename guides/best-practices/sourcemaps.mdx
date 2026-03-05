@@ -1,0 +1,646 @@
+---
+title: Source Maps Configuration
+description: Configure source maps for readable stack traces in production
+---
+
+Source maps translate minified production code back to readable source code, making error stack traces actionable in Sentry.
+
+## Why Source Maps Matter
+
+Without source maps, production errors look like this:
+
+```
+Error: Cannot read property 'x' of undefined
+  at t.a (bundle.min.js:1:3421)
+  at Object.r (bundle.min.js:1:7834)
+```
+
+With source maps:
+
+```
+Error: Cannot read property 'x' of undefined
+  at UserProfile.fetchUser (components/UserProfile.tsx:42:15)
+  at async renderProfile (pages/profile.tsx:18:5)
+```
+
+## Quick Start
+
+### Next.js
+
+Source maps are configured automatically:
+
+```javascript
+// next.config.js
+const { withSentryConfig } = require('@sentry/nextjs');
+
+module.exports = withSentryConfig(
+  {
+    // Your Next.js config
+  },
+  {
+    org: 'your-org',
+    project: 'your-project',
+    authToken: process.env.SENTRY_AUTH_TOKEN,
+    
+    silent: true,
+    
+    // Source maps are automatically:
+    // - Generated during build
+    // - Uploaded to Sentry
+    // - Deleted from deployment (v9+)
+  }
+);
+```
+
+<Tip>
+In Next.js SDK v9+, client-side source maps are automatically deleted after upload to keep them private.
+</Tip>
+
+### Vite
+
+```bash
+npm install @sentry/vite-plugin --save-dev
+```
+
+```javascript
+// vite.config.js
+import { sentryVitePlugin } from '@sentry/vite-plugin';
+
+export default {
+  build: {
+    sourcemap: true, // Enable source maps
+  },
+  plugins: [
+    sentryVitePlugin({
+      org: 'your-org',
+      project: 'your-project',
+      authToken: process.env.SENTRY_AUTH_TOKEN,
+    }),
+  ],
+};
+```
+
+### Webpack
+
+```bash
+npm install @sentry/webpack-plugin --save-dev
+```
+
+```javascript
+// webpack.config.js
+const { sentryWebpackPlugin } = require('@sentry/webpack-plugin');
+
+module.exports = {
+  devtool: 'source-map', // or 'hidden-source-map'
+  
+  plugins: [
+    sentryWebpackPlugin({
+      org: 'your-org',
+      project: 'your-project',
+      authToken: process.env.SENTRY_AUTH_TOKEN,
+    }),
+  ],
+};
+```
+
+## Source Map Types
+
+### For Production
+
+```javascript
+// webpack.config.js
+module.exports = {
+  // ✅ Recommended: Full source maps, not exposed to users
+  devtool: 'hidden-source-map',
+  
+  // Alternative: Source maps without original source code
+  // devtool: 'nosources-source-map',
+};
+```
+
+### For Development
+
+```javascript
+module.exports = {
+  devtool: process.env.NODE_ENV === 'production' 
+    ? 'hidden-source-map'
+    : 'eval-source-map', // Faster rebuilds
+};
+```
+
+## Authentication
+
+### Auth Token (Recommended)
+
+Create an auth token in Sentry:
+
+1. Go to Settings → Auth Tokens
+2. Create a token with `project:releases` scope
+3. Store in environment variable:
+
+```bash
+# .env.local
+SENTRY_AUTH_TOKEN=your-token-here
+```
+
+```javascript
+sentryWebpackPlugin({
+  authToken: process.env.SENTRY_AUTH_TOKEN,
+});
+```
+
+<Warning>
+Never commit auth tokens to version control. Use environment variables or CI secrets.
+</Warning>
+
+### API Key (Legacy)
+
+```javascript
+sentryWebpackPlugin({
+  authToken: process.env.SENTRY_AUTH_TOKEN, // Preferred
+  // OR (legacy)
+  // api_key: process.env.SENTRY_API_KEY,
+});
+```
+
+## Upload Configuration
+
+### Basic Upload
+
+```javascript
+sentryWebpackPlugin({
+  org: 'your-org',
+  project: 'your-project',
+  authToken: process.env.SENTRY_AUTH_TOKEN,
+  
+  // Upload all assets
+  include: './dist',
+  
+  // Ignore certain files
+  ignore: ['node_modules', 'webpack.config.js'],
+});
+```
+
+### Advanced Options
+
+```javascript
+sentryWebpackPlugin({
+  org: 'your-org',
+  project: 'your-project',
+  authToken: process.env.SENTRY_AUTH_TOKEN,
+  
+  // Source maps location
+  include: './dist',
+  
+  // URL prefix (how files are referenced in production)
+  urlPrefix: '~/static/js/',
+  
+  // Delete source maps after upload
+  filesToDeleteAfterUpload: ['dist/**/*.js.map'],
+  
+  // Set release name
+  release: {
+    name: process.env.RELEASE_VERSION,
+  },
+  
+  // Upload during production builds only
+  silent: !process.env.CI,
+});
+```
+
+## Release Management
+
+### Automatic Release Detection
+
+The plugin tries to detect the release automatically from:
+
+1. `SENTRY_RELEASE` environment variable
+2. Git commit SHA
+3. CI environment variables
+
+### Manual Release Name
+
+```javascript
+sentryWebpackPlugin({
+  // ...
+  release: {
+    name: 'my-app@1.2.3',
+  },
+});
+```
+
+### Matching SDK Release
+
+Ensure your SDK uses the same release:
+
+```javascript
+import * as Sentry from '@sentry/browser';
+
+Sentry.init({
+  dsn: '__DSN__',
+  release: 'my-app@1.2.3', // Must match uploaded source maps
+});
+```
+
+<Warning>
+Source maps won't work if the release name in `Sentry.init()` doesn't match the release used during upload.
+</Warning>
+
+## URL Prefix Configuration
+
+### Same Origin
+
+```javascript
+sentryWebpackPlugin({
+  include: './dist',
+  urlPrefix: '~/', // Files at root: /main.js
+});
+```
+
+### Nested Path
+
+```javascript
+sentryWebpackPlugin({
+  include: './dist',
+  urlPrefix: '~/static/js/', // Files at: /static/js/main.js
+});
+```
+
+### CDN Hosting
+
+```javascript
+sentryWebpackPlugin({
+  include: './dist',
+  urlPrefix: 'https://cdn.example.com/assets/',
+});
+```
+
+### Multiple Bundles
+
+```javascript
+sentryWebpackPlugin({
+  include: [
+    { paths: ['./dist/app'], urlPrefix: '~/app/' },
+    { paths: ['./dist/admin'], urlPrefix: '~/admin/' },
+  ],
+});
+```
+
+## Debugging Source Maps
+
+### Verify Upload
+
+Check if source maps were uploaded:
+
+```bash
+sentry-cli releases files <release-name> list
+```
+
+### Validate Source Maps
+
+```bash
+sentry-cli sourcemaps explain <event-id>
+```
+
+### Common Issues
+
+<Accordion title="Source maps not applied to events">
+  **Symptoms:** Stack traces show minified code
+  
+  **Solutions:**
+  1. Verify release name matches:
+     ```javascript
+     // SDK
+     Sentry.init({ release: 'v1.0.0' });
+     
+     // Upload
+     sentryWebpackPlugin({ release: { name: 'v1.0.0' } });
+     ```
+  
+  2. Check URL prefix:
+     ```javascript
+     // If files are at https://example.com/js/main.js
+     sentryWebpackPlugin({ urlPrefix: '~/js/' });
+     ```
+  
+  3. Ensure source maps are uploaded:
+     ```bash
+     sentry-cli releases files v1.0.0 list
+     ```
+</Accordion>
+
+<Accordion title="'File not found' errors">
+  **Symptoms:** Sentry shows "file not found" in stack traces
+  
+  **Solutions:**
+  1. Verify `urlPrefix` matches production URLs
+  2. Check that files were uploaded:
+     ```bash
+     sentry-cli releases files <release> list
+     ```
+  3. Ensure filenames match exactly (case-sensitive)
+</Accordion>
+
+<Accordion title="Partial source maps">
+  **Symptoms:** Some files have source maps, others don't
+  
+  **Solutions:**
+  1. Check `include` paths:
+     ```javascript
+     sentryWebpackPlugin({
+       include: [
+         './dist/app',
+         './dist/vendor', // Don't forget vendor bundles
+       ],
+     });
+     ```
+  
+  2. Verify all builds generate source maps:
+     ```javascript
+     // webpack.config.js
+     devtool: 'source-map', // For all builds
+     ```
+</Accordion>
+
+## Framework-Specific Guides
+
+### React (Create React App)
+
+```bash
+npm install @sentry/webpack-plugin --save-dev
+```
+
+```javascript
+// config-overrides.js (with react-app-rewired)
+const { sentryWebpackPlugin } = require('@sentry/webpack-plugin');
+
+module.exports = function override(config) {
+  config.plugins.push(
+    sentryWebpackPlugin({
+      org: 'your-org',
+      project: 'your-project',
+      authToken: process.env.SENTRY_AUTH_TOKEN,
+      include: './build',
+    })
+  );
+  
+  return config;
+};
+```
+
+### Vue CLI
+
+```javascript
+// vue.config.js
+const { sentryWebpackPlugin } = require('@sentry/webpack-plugin');
+
+module.exports = {
+  configureWebpack: {
+    devtool: 'source-map',
+    plugins: [
+      sentryWebpackPlugin({
+        org: 'your-org',
+        project: 'your-project',
+        authToken: process.env.SENTRY_AUTH_TOKEN,
+        include: './dist',
+      }),
+    ],
+  },
+};
+```
+
+### Angular
+
+```javascript
+// angular.json
+{
+  "projects": {
+    "your-app": {
+      "architect": {
+        "build": {
+          "configurations": {
+            "production": {
+              "sourceMap": {
+                "scripts": true,
+                "styles": true,
+                "hidden": true
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+Then use webpack plugin or upload manually.
+
+### Svelte (SvelteKit)
+
+```javascript
+// svelte.config.js
+import { sveltekit } from '@sveltejs/kit/vite';
+import { sentryVitePlugin } from '@sentry/vite-plugin';
+
+export default {
+  plugins: [
+    sveltekit(),
+    sentryVitePlugin({
+      org: 'your-org',
+      project: 'your-project',
+      authToken: process.env.SENTRY_AUTH_TOKEN,
+    }),
+  ],
+  build: {
+    sourcemap: true,
+  },
+};
+```
+
+## CI/CD Integration
+
+### GitHub Actions
+
+```yaml
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Build
+        run: npm run build
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: your-org
+          SENTRY_PROJECT: your-project
+      
+      - name: Create Sentry release
+        uses: getsentry/action-release@v1
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: your-org
+          SENTRY_PROJECT: your-project
+        with:
+          environment: production
+          version: ${{ github.sha }}
+```
+
+### GitLab CI
+
+```yaml
+build:
+  script:
+    - npm run build
+  variables:
+    SENTRY_AUTH_TOKEN: $SENTRY_AUTH_TOKEN
+    SENTRY_ORG: your-org
+    SENTRY_PROJECT: your-project
+  artifacts:
+    paths:
+      - dist/
+```
+
+### Manual Upload with Sentry CLI
+
+```bash
+# Install CLI
+npm install @sentry/cli --save-dev
+
+# Create release
+sentry-cli releases new "my-app@1.0.0"
+
+# Upload source maps
+sentry-cli releases files "my-app@1.0.0" upload-sourcemaps ./dist
+
+# Finalize release
+sentry-cli releases finalize "my-app@1.0.0"
+
+# Associate commits
+sentry-cli releases set-commits "my-app@1.0.0" --auto
+```
+
+## Security Best Practices
+
+<Accordion title="Use hidden source maps in production">
+  Prevent exposing source code to users:
+  
+  ```javascript
+  module.exports = {
+    devtool: 'hidden-source-map', // Generates maps without references
+  };
+  ```
+</Accordion>
+
+<Accordion title="Delete source maps after upload">
+  Remove source maps from your deployment:
+  
+  ```javascript
+  sentryWebpackPlugin({
+    filesToDeleteAfterUpload: ['dist/**/*.map'],
+  });
+  ```
+</Accordion>
+
+<Accordion title="Restrict source map access">
+  In Sentry, limit who can view source code:
+  
+  1. Go to Settings → General Settings
+  2. Configure "Data Scrubbing"
+  3. Enable "Scrub data before sending"
+</Accordion>
+
+<Accordion title="Use separate builds for development">
+  Different source map types for different environments:
+  
+  ```javascript
+  module.exports = {
+    devtool: process.env.NODE_ENV === 'production'
+      ? 'hidden-source-map'
+      : 'eval-source-map',
+  };
+  ```
+</Accordion>
+
+## Troubleshooting Commands
+
+```bash
+# List uploaded files
+sentry-cli releases files <release-name> list
+
+# Validate source maps locally
+sentry-cli sourcemaps validate ./dist
+
+# Explain why source maps didn't work for an event
+sentry-cli sourcemaps explain <event-id>
+
+# Upload source maps manually
+sentry-cli releases files <release> upload-sourcemaps ./dist \
+  --url-prefix '~/static/js/'
+
+# Delete uploaded files
+sentry-cli releases files <release> delete --all
+```
+
+## Complete Example
+
+```javascript
+// webpack.config.js
+const { sentryWebpackPlugin } = require('@sentry/webpack-plugin');
+
+const isProd = process.env.NODE_ENV === 'production';
+
+module.exports = {
+  mode: isProd ? 'production' : 'development',
+  
+  devtool: isProd ? 'hidden-source-map' : 'eval-source-map',
+  
+  plugins: [
+    isProd && sentryWebpackPlugin({
+      org: process.env.SENTRY_ORG,
+      project: process.env.SENTRY_PROJECT,
+      authToken: process.env.SENTRY_AUTH_TOKEN,
+      
+      include: './dist',
+      urlPrefix: '~/',
+      
+      release: {
+        name: process.env.RELEASE_VERSION || 'development',
+      },
+      
+      filesToDeleteAfterUpload: ['dist/**/*.map'],
+      
+      silent: true,
+    }),
+  ].filter(Boolean),
+};
+```
+
+```javascript
+// src/index.js
+import * as Sentry from '@sentry/browser';
+
+Sentry.init({
+  dsn: '__DSN__',
+  release: process.env.RELEASE_VERSION,
+  environment: process.env.NODE_ENV,
+});
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Error Handling" href="/guides/best-practices/error-handling">
+    Best practices for capturing errors
+  </Card>
+  <Card title="Bundle Size" href="/guides/best-practices/bundle-size">
+    Optimize SDK bundle size
+  </Card>
+</CardGroup>

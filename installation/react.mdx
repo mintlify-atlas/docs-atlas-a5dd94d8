@@ -1,0 +1,581 @@
+---
+title: 'React Installation'
+description: 'Install and configure the Sentry SDK for React applications'
+---
+
+The `@sentry/react` package provides error tracking, performance monitoring, and React-specific features like Error Boundaries and component profiling.
+
+## Prerequisites
+
+- Node.js 18 or newer
+- React 16.14.0, 17.x, 18.x, or 19.x
+- A Sentry account and project DSN
+
+## Installation
+
+<Steps>
+  <Step title="Install the Package">
+    Install `@sentry/react` using your preferred package manager:
+
+    <CodeGroup>
+    ```bash npm
+    npm install @sentry/react
+    ```
+
+    ```bash yarn
+    yarn add @sentry/react
+    ```
+
+    ```bash pnpm
+    pnpm add @sentry/react
+    ```
+    </CodeGroup>
+
+    **Current Version:** 10.42.0
+  </Step>
+
+  <Step title="Initialize Sentry">
+    Initialize Sentry **before** you mount your React component. This should be done as early as possible:
+
+    ```javascript
+    import React from 'react';
+    import { createRoot } from 'react-dom/client';
+    import * as Sentry from '@sentry/react';
+    import App from './App';
+
+    Sentry.init({
+      dsn: 'YOUR_DSN_HERE',
+      
+      integrations: [
+        Sentry.browserTracingIntegration(),
+        Sentry.replayIntegration(),
+      ],
+      
+      // Tracing
+      tracesSampleRate: 1.0,
+      
+      // Session Replay
+      replaysSessionSampleRate: 0.1,
+      replaysOnErrorSampleRate: 1.0,
+    });
+
+    const container = document.getElementById('app');
+    const root = createRoot(container);
+    root.render(<App />);
+    ```
+  </Step>
+
+  <Step title="Verify Installation">
+    Test that Sentry is working:
+
+    ```javascript
+    Sentry.captureException(new Error('Test error'));
+    ```
+
+    Check your Sentry dashboard to see the error.
+  </Step>
+</Steps>
+
+## React 19 Error Handling
+
+Starting with React 19, `createRoot` and `hydrateRoot` expose error hooks that can be used to capture errors automatically:
+
+```javascript
+import { createRoot } from 'react-dom/client';
+import * as Sentry from '@sentry/react';
+import App from './App';
+
+const container = document.getElementById('app');
+const root = createRoot(container, {
+  // Callback called when an error is thrown and not caught by an Error Boundary
+  onUncaughtError: Sentry.reactErrorHandler((error, errorInfo) => {
+    console.warn('Uncaught error', error, errorInfo.componentStack);
+  }),
+  
+  // Callback called when React catches an error in an Error Boundary
+  onCaughtError: Sentry.reactErrorHandler(),
+  
+  // Callback called when React automatically recovers from errors
+  onRecoverableError: Sentry.reactErrorHandler(),
+});
+
+root.render(<App />);
+```
+
+<Tip>
+  For finer-grained control, use only the `onUncaughtError` and `onRecoverableError` hooks, and use an `ErrorBoundary` component instead of the `onCaughtError` hook.
+</Tip>
+
+## Error Boundary
+
+The `@sentry/react` package exports an `ErrorBoundary` component that automatically captures JavaScript errors from inside a component tree and displays a fallback UI:
+
+```javascript
+import React from 'react';
+import * as Sentry from '@sentry/react';
+
+function FallbackComponent() {
+  return <div>An error has occurred</div>;
+}
+
+function App() {
+  return (
+    <Sentry.ErrorBoundary fallback={FallbackComponent} showDialog>
+      <YourApplication />
+    </Sentry.ErrorBoundary>
+  );
+}
+
+export default App;
+```
+
+### Error Boundary Options
+
+```javascript
+<Sentry.ErrorBoundary
+  fallback={FallbackComponent}
+  showDialog={true}
+  dialogOptions={{
+    title: 'It looks like we\'re having issues.',
+    subtitle: 'Our team has been notified.',
+    subtitle2: 'If you\'d like to help, tell us what happened below.',
+  }}
+  beforeCapture={(scope, error, errorInfo) => {
+    scope.setTag('location', 'boundary');
+    scope.setContext('errorBoundary', errorInfo);
+  }}
+>
+  <YourApplication />
+</Sentry.ErrorBoundary>
+```
+
+### Multiple Error Boundaries
+
+You can use multiple error boundaries to isolate different parts of your app:
+
+```javascript
+function App() {
+  return (
+    <Sentry.ErrorBoundary fallback={ErrorPage}>
+      <Header />
+      
+      <Sentry.ErrorBoundary fallback={SidebarError}>
+        <Sidebar />
+      </Sentry.ErrorBoundary>
+      
+      <Sentry.ErrorBoundary fallback={ContentError}>
+        <Content />
+      </Sentry.ErrorBoundary>
+      
+      <Footer />
+    </Sentry.ErrorBoundary>
+  );
+}
+```
+
+## React Profiler
+
+The Profiler component tracks component lifecycle performance:
+
+```javascript
+import * as Sentry from '@sentry/react';
+
+function App() {
+  return (
+    <div>
+      <Sentry.Profiler name="Header">
+        <Header />
+      </Sentry.Profiler>
+      
+      <Sentry.Profiler name="MainContent">
+        <MainContent />
+      </Sentry.Profiler>
+      
+      <Sentry.Profiler name="Footer">
+        <Footer />
+      </Sentry.Profiler>
+    </div>
+  );
+}
+```
+
+Or wrap an entire component with the HOC:
+
+```javascript
+import * as Sentry from '@sentry/react';
+
+class MyComponent extends React.Component {
+  render() {
+    return (
+      <div>
+        <Header />
+        <Content />
+        <Footer />
+      </div>
+    );
+  }
+}
+
+export default Sentry.withProfiler(MyComponent);
+```
+
+<Note>
+  The Profiler requires tracing to be enabled. If tracing is not enabled, the Profiler will not work.
+</Note>
+
+## React Router Integration
+
+### React Router v6
+
+```javascript
+import React from 'react';
+import {
+  createBrowserRouter,
+  RouterProvider,
+} from 'react-router-dom';
+import * as Sentry from '@sentry/react';
+
+const sentryCreateBrowserRouter = Sentry.wrapCreateBrowserRouter(
+  createBrowserRouter
+);
+
+const router = sentryCreateBrowserRouter([
+  {
+    path: '/',
+    element: <Home />,
+  },
+  {
+    path: '/about',
+    element: <About />,
+  },
+]);
+
+function App() {
+  return <RouterProvider router={router} />;
+}
+```
+
+### React Router v5 and v4
+
+```javascript
+import React from 'react';
+import { Router, Route, Switch } from 'react-router-dom';
+import { createBrowserHistory } from 'history';
+import * as Sentry from '@sentry/react';
+
+const history = createBrowserHistory();
+
+const SentryRoutes = Sentry.withSentryRouting(Route);
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  integrations: [
+    Sentry.browserTracingIntegration({ routingInstrumentation: Sentry.reactRouterV5Instrumentation(history) }),
+  ],
+  tracesSampleRate: 1.0,
+});
+
+function App() {
+  return (
+    <Router history={history}>
+      <Switch>
+        <SentryRoutes path="/" component={Home} exact />
+        <SentryRoutes path="/about" component={About} />
+      </Switch>
+    </Router>
+  );
+}
+```
+
+## Usage
+
+### Capturing Errors
+
+```javascript
+import * as Sentry from '@sentry/react';
+
+try {
+  someFunctionThatMightFail();
+} catch (error) {
+  Sentry.captureException(error);
+}
+```
+
+### Setting Context
+
+```javascript
+import * as Sentry from '@sentry/react';
+
+// Set user information
+Sentry.setUser({ 
+  id: '123',
+  email: 'user@example.com',
+  username: 'john_doe' 
+});
+
+// Set tags
+Sentry.setTag('page', 'profile');
+
+// Set extra context
+Sentry.setExtra('userData', userData);
+```
+
+### Adding Breadcrumbs
+
+```javascript
+import * as Sentry from '@sentry/react';
+
+Sentry.addBreadcrumb({
+  category: 'ui.click',
+  message: 'User clicked on submit button',
+  level: 'info',
+});
+```
+
+### Custom Spans
+
+```javascript
+import * as Sentry from '@sentry/react';
+
+function MyComponent() {
+  const fetchData = async () => {
+    const data = await Sentry.startSpan(
+      { name: 'fetch-user-data', op: 'http.client' },
+      async () => {
+        const response = await fetch('/api/user');
+        return response.json();
+      }
+    );
+    
+    return data;
+  };
+  
+  // ...
+}
+```
+
+## Performance Monitoring
+
+### Basic Configuration
+
+```javascript
+import * as Sentry from '@sentry/react';
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  
+  integrations: [
+    Sentry.browserTracingIntegration(),
+  ],
+  
+  tracesSampleRate: 1.0,
+  tracePropagationTargets: ['localhost', /^https:\/\/yourserver\.io\/api/],
+});
+```
+
+### With React Router
+
+```javascript
+import * as Sentry from '@sentry/react';
+import { useEffect } from 'react';
+import { useLocation, useNavigationType, createRoutesFromChildren, matchRoutes } from 'react-router-dom';
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  
+  integrations: [
+    Sentry.reactRouterV6BrowserTracingIntegration({
+      useEffect,
+      useLocation,
+      useNavigationType,
+      createRoutesFromChildren,
+      matchRoutes,
+    }),
+  ],
+  
+  tracesSampleRate: 1.0,
+});
+```
+
+## Session Replay
+
+Capture session replays to see what users experienced:
+
+```javascript
+import * as Sentry from '@sentry/react';
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  
+  integrations: [
+    Sentry.replayIntegration({
+      maskAllText: true,
+      blockAllMedia: true,
+    }),
+  ],
+  
+  replaysSessionSampleRate: 0.1,
+  replaysOnErrorSampleRate: 1.0,
+});
+```
+
+### Privacy Options
+
+```javascript
+Sentry.replayIntegration({
+  // Mask all text content
+  maskAllText: true,
+  
+  // Block all media elements (video, audio, img)
+  blockAllMedia: true,
+  
+  // Mask specific elements by CSS selector
+  mask: ['.sensitive-data', '#credit-card'],
+  
+  // Block specific elements
+  block: ['.ads', '.third-party-widget'],
+})
+```
+
+## Advanced Configuration
+
+### TypeScript
+
+The SDK is written in TypeScript and includes type definitions:
+
+```typescript
+import * as Sentry from '@sentry/react';
+import type { ErrorBoundaryProps } from '@sentry/react';
+
+const errorBoundaryConfig: ErrorBoundaryProps = {
+  fallback: ({ error, componentStack, resetError }) => (
+    <div>
+      <h1>An error occurred</h1>
+      <p>{error.message}</p>
+      <button onClick={resetError}>Try again</button>
+    </div>
+  ),
+  showDialog: true,
+};
+```
+
+### Redux Integration
+
+```javascript
+import { configureStore } from '@reduxjs/toolkit';
+import * as Sentry from '@sentry/react';
+
+const sentryReduxEnhancer = Sentry.createReduxEnhancer({
+  actionTransformer: (action) => {
+    if (action.type === 'SENSITIVE_ACTION') {
+      return null; // Don't send this action to Sentry
+    }
+    return action;
+  },
+});
+
+const store = configureStore({
+  reducer: rootReducer,
+  enhancers: [sentryReduxEnhancer],
+});
+```
+
+### Next Steps After Errors
+
+```javascript
+import * as Sentry from '@sentry/react';
+
+function ErrorFallback({ error, componentStack, resetError }) {
+  const eventId = Sentry.lastEventId();
+  
+  return (
+    <div>
+      <h1>An error occurred</h1>
+      <p>{error.message}</p>
+      
+      <button onClick={() => Sentry.showReportDialog({ eventId })}>
+        Report feedback
+      </button>
+      
+      <button onClick={resetError}>
+        Try again
+      </button>
+    </div>
+  );
+}
+```
+
+## Troubleshooting
+
+### Source Maps
+
+For production builds with Webpack:
+
+1. Install the Webpack plugin:
+   ```bash
+   npm install @sentry/webpack-plugin --save-dev
+   ```
+
+2. Configure in `webpack.config.js`:
+   ```javascript
+   const { sentryWebpackPlugin } = require('@sentry/webpack-plugin');
+   
+   module.exports = {
+     devtool: 'source-map',
+     plugins: [
+       sentryWebpackPlugin({
+         authToken: process.env.SENTRY_AUTH_TOKEN,
+         org: 'your-org',
+         project: 'your-project',
+       }),
+     ],
+   };
+   ```
+
+For Vite:
+
+```javascript
+// vite.config.js
+import { sentryVitePlugin } from '@sentry/vite-plugin';
+
+export default defineConfig({
+  build: {
+    sourcemap: true,
+  },
+  plugins: [
+    sentryVitePlugin({
+      authToken: process.env.SENTRY_AUTH_TOKEN,
+      org: 'your-org',
+      project: 'your-project',
+    }),
+  ],
+});
+```
+
+### Error Boundaries Not Working
+
+Make sure:
+1. You're using a class component or the Sentry `ErrorBoundary`
+2. The error is thrown during render, not in event handlers
+3. For event handler errors, use `try/catch` with `Sentry.captureException()`
+
+<Warning>
+  Error Boundaries do not catch errors in:
+  - Event handlers (use `try/catch` instead)
+  - Asynchronous code (setTimeout, promises)
+  - Server-side rendering
+  - Errors thrown in the Error Boundary itself
+</Warning>
+
+## Next Steps
+
+- Configure [React Router Integration](/essentials/react-router)
+- Set up [Redux Integration](/essentials/redux-integration)
+- Learn about [Session Replay](/essentials/session-replay)
+- Explore [Performance Monitoring](/essentials/performance-monitoring)
+
+## Related Documentation
+
+- [Official React SDK Docs](https://docs.sentry.io/platforms/javascript/guides/react/)
+- [Sentry React Package on npm](https://www.npmjs.com/package/@sentry/react)
+- [Source Code on GitHub](https://github.com/getsentry/sentry-javascript/tree/master/packages/react)

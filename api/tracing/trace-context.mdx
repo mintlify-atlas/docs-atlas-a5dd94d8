@@ -1,0 +1,426 @@
+---
+title: "Trace Context"
+description: "Manage trace and span context for distributed tracing"
+---
+
+Trace context contains information about the current trace and span, enabling distributed tracing across services.
+
+## Overview
+
+Trace context includes:
+- Trace ID: Unique identifier for the entire trace
+- Span ID: Unique identifier for the current span
+- Parent Span ID: Links spans together
+- Sampling decision: Whether the trace is sampled
+- Trace flags: Metadata about the trace
+
+## SpanContextData
+
+From `packages/core/src/types-hoist/span.ts`:
+
+```typescript
+export interface SpanContextData {
+  /**
+   * Trace ID - 32 lowercase hex characters (128 bits)
+   */
+  traceId: string;
+
+  /**
+   * Span ID - 16 lowercase hex characters (64 bits)
+   */
+  spanId: string;
+
+  /**
+   * Whether the span was propagated from a remote parent
+   */
+  isRemote?: boolean | undefined;
+
+  /**
+   * Trace flags - bitmap (1 = sampled)
+   */
+  traceFlags: TraceFlag | number;
+
+  /**
+   * Trace state for key-value pairs
+   */
+  traceState?: TraceState | undefined;
+}
+```
+
+## Getting Trace Context
+
+### From Active Span
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+Sentry.startSpan({ name: 'Operation' }, (span) => {
+  const context = span.spanContext();
+  
+  console.log('Trace ID:', context.traceId);
+  console.log('Span ID:', context.spanId);
+  console.log('Is Sampled:', context.traceFlags === 1);
+});
+```
+
+### From Scope
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+const propagationContext = Sentry.getCurrentScope().getPropagationContext();
+
+console.log('Trace ID:', propagationContext.traceId);
+console.log('Span ID:', propagationContext.spanId);
+console.log('Parent Span ID:', propagationContext.parentSpanId);
+```
+
+## PropagationContext
+
+Stored on the scope for trace propagation:
+
+```typescript
+export interface PropagationContext {
+  traceId: string;
+  spanId?: string;
+  parentSpanId?: string;
+  sampled?: boolean;
+  dsc?: Partial<DynamicSamplingContext>;
+}
+```
+
+### Setting Propagation Context
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+const scope = Sentry.getCurrentScope();
+scope.setPropagationContext({
+  traceId: '1234567890abcdef1234567890abcdef',
+  spanId: '1234567890abcdef',
+  sampled: true
+});
+```
+
+## Trace Headers
+
+### sentry-trace Header
+
+Format: `{trace_id}-{span_id}-{sampled}`
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+const span = Sentry.getActiveSpan();
+if (span) {
+  const context = span.spanContext();
+  const sampled = context.traceFlags === 1 ? '1' : '0';
+  const sentryTrace = `${context.traceId}-${context.spanId}-${sampled}`;
+  
+  // Attach to outgoing request
+  fetch('/api/endpoint', {
+    headers: {
+      'sentry-trace': sentryTrace
+    }
+  });
+}
+```
+
+### baggage Header
+
+Contains dynamic sampling context:
+
+```typescript
+import * as Sentry from '@sentry/node';
+import { dynamicSamplingContextToSentryBaggageHeader } from '@sentry/core';
+
+const client = Sentry.getClient();
+const scope = Sentry.getCurrentScope();
+
+if (client) {
+  const dsc = Sentry.getDynamicSamplingContextFromScope(client, scope);
+  const baggage = dynamicSamplingContextToSentryBaggageHeader(dsc);
+  
+  fetch('/api/endpoint', {
+    headers: {
+      'baggage': baggage
+    }
+  });
+}
+```
+
+## Continuing Traces
+
+### continueTrace
+
+Continue a trace from incoming headers:
+
+```typescript
+import * as Sentry from '@sentry/node';
+import type { Request } from 'express';
+
+app.get('/api/endpoint', (req: Request, res) => {
+  Sentry.continueTrace(
+    {
+      sentryTrace: req.headers['sentry-trace'],
+      baggage: req.headers['baggage']
+    },
+    () => {
+      // Trace is continued from parent
+      Sentry.startSpan({ name: 'Handle Request' }, () => {
+        handleRequest(req, res);
+      });
+    }
+  );
+});
+```
+
+### From HTML Meta Tags (Browser)
+
+```typescript
+import * as Sentry from '@sentry/browser';
+
+// Server renders:
+// <meta name="sentry-trace" content="..." />
+// <meta name="baggage" content="..." />
+
+const sentryTrace = document.querySelector(
+  'meta[name="sentry-trace"]'
+)?.getAttribute('content');
+
+const baggage = document.querySelector(
+  'meta[name="baggage"]'
+)?.getAttribute('content');
+
+if (sentryTrace) {
+  Sentry.continueTrace({ sentryTrace, baggage }, () => {
+    // Client continues server trace
+  });
+}
+```
+
+## Dynamic Sampling Context
+
+Additional context for sampling decisions:
+
+```typescript
+export interface DynamicSamplingContext {
+  trace_id: string;
+  public_key: string;
+  release?: string;
+  environment?: string;
+  transaction?: string;
+  sample_rate?: string;
+  sampled?: string;
+  user_segment?: string;
+}
+```
+
+### Getting DSC
+
+```typescript
+import * as Sentry from '@sentry/node';
+import { getDynamicSamplingContextFromSpan } from '@sentry/core';
+
+const span = Sentry.getActiveSpan();
+if (span) {
+  const dsc = getDynamicSamplingContextFromSpan(span);
+  console.log('Release:', dsc.release);
+  console.log('Environment:', dsc.environment);
+}
+```
+
+## Root Span
+
+Get the root span of the current trace:
+
+```typescript
+import * as Sentry from '@sentry/node';
+import { getRootSpan } from '@sentry/core';
+
+Sentry.startSpan({ name: 'Parent' }, () => {
+  Sentry.startSpan({ name: 'Child' }, () => {
+    Sentry.startSpan({ name: 'Grandchild' }, (span) => {
+      const root = getRootSpan(span);
+      console.log('Root span name:', root.name); // 'Parent'
+    });
+  });
+});
+```
+
+## Trace ID Generation
+
+```typescript
+import { uuid4 } from '@sentry/core';
+
+// Generate new trace ID (32 hex characters)
+const traceId = uuid4().replace(/-/g, '');
+console.log(traceId); // e.g., '1234567890abcdef1234567890abcdef'
+```
+
+## Span Relationships
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+Sentry.startSpan(
+  { name: 'Parent Operation', op: 'task' },
+  (parentSpan) => {
+    const parentContext = parentSpan.spanContext();
+    console.log('Parent Span ID:', parentContext.spanId);
+    
+    Sentry.startSpan(
+      { name: 'Child Operation', op: 'subtask' },
+      (childSpan) => {
+        const childContext = childSpan.spanContext();
+        
+        // Same trace ID
+        console.log('Same trace:', 
+          parentContext.traceId === childContext.traceId
+        );
+        
+        // Different span IDs
+        console.log('Different spans:', 
+          parentContext.spanId !== childContext.spanId
+        );
+      }
+    );
+  }
+);
+```
+
+## Custom Parent Span
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+const parentSpan = Sentry.startInactiveSpan({
+  name: 'Parent',
+  op: 'task'
+});
+
+// Create child with explicit parent
+Sentry.startSpan(
+  {
+    name: 'Child',
+    op: 'subtask',
+    parentSpan: parentSpan
+  },
+  () => {
+    // This span is a child of parentSpan
+  }
+);
+
+parentSpan.end();
+```
+
+## Sampling Decisions
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+Sentry.startSpan({ name: 'Operation' }, (span) => {
+  const context = span.spanContext();
+  const isSampled = context.traceFlags === 1;
+  
+  if (isSampled) {
+    // Span will be sent to Sentry
+    span.setAttribute('debug', 'detailed info');
+  } else {
+    // Span is not sampled, minimal overhead
+  }
+});
+```
+
+## Trace State
+
+OpenTelemetry trace state for vendor-specific data:
+
+```typescript
+export interface TraceState {
+  set(key: string, value: string): TraceState;
+  unset(key: string): TraceState;
+  get(key: string): string | undefined;
+  serialize(): string;
+}
+```
+
+## Implementation Example
+
+From `packages/core/src/tracing/trace.ts`:
+
+```typescript
+export function continueTrace<V>(
+  {
+    sentryTrace,
+    baggage,
+  }: {
+    sentryTrace?: string;
+    baggage?: string | string[];
+  },
+  callback: () => V,
+): V {
+  const currentScope = getCurrentScope();
+  
+  // Parse incoming trace headers
+  const propagationContext = propagationContextFromHeaders(
+    sentryTrace,
+    baggage
+  );
+  
+  // Set on scope
+  currentScope.setPropagationContext(propagationContext);
+  
+  // Execute callback with continued trace
+  return callback();
+}
+```
+
+## Best Practices
+
+### 1. Always Propagate Context
+
+```typescript
+// Outgoing HTTP requests
+const span = Sentry.getActiveSpan();
+if (span) {
+  const context = span.spanContext();
+  fetch(url, {
+    headers: {
+      'sentry-trace': `${context.traceId}-${context.spanId}-1`
+    }
+  });
+}
+```
+
+### 2. Continue Traces in Services
+
+```typescript
+// Incoming requests
+app.use((req, res, next) => {
+  Sentry.continueTrace(
+    {
+      sentryTrace: req.headers['sentry-trace'],
+      baggage: req.headers['baggage']
+    },
+    () => next()
+  );
+});
+```
+
+### 3. Preserve Sampling Decisions
+
+```typescript
+// Child services honor parent sampling
+const propagationContext = scope.getPropagationContext();
+if (propagationContext.sampled === false) {
+  // Don't create new sampled spans
+}
+```
+
+## Related
+
+- [Spans](/api/tracing/spans)
+- [Propagation](/api/tracing/propagation)
+- [Span Types](/api/types/span)
+- [Sampling](/api/configuration/sampling)

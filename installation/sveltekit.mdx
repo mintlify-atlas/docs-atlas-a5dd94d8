@@ -1,0 +1,526 @@
+---
+title: 'SvelteKit Installation'
+description: 'Install and configure the Sentry SDK for SvelteKit applications'
+---
+
+The `@sentry/sveltekit` package provides comprehensive error tracking and performance monitoring for SvelteKit applications, with support for both client and server environments.
+
+## Prerequisites
+
+- Node.js 18 or newer
+- SvelteKit 2.0.0 or newer
+- Vite 4.2 or newer (recommended)
+- A Sentry account and project DSN
+
+<Note>
+  The SDK works best with Vite 4.2 and newer. Older versions might not generate source maps correctly.
+</Note>
+
+## Quick Installation with Wizard
+
+The fastest way to get started is using the Sentry SvelteKit Wizard:
+
+```bash
+npx @sentry/wizard@latest -i sveltekit
+```
+
+The wizard will:
+1. Install `@sentry/sveltekit`
+2. Create configuration files
+3. Set up source map uploads
+4. Configure hooks
+
+<Tip>
+  The wizard automates the entire setup process. If you prefer manual installation, follow the steps below.
+</Tip>
+
+## Manual Installation
+
+<Steps>
+  <Step title="Install the Package">
+    Install `@sentry/sveltekit` using your preferred package manager:
+
+    <CodeGroup>
+    ```bash npm
+    npm install @sentry/sveltekit
+    ```
+
+    ```bash yarn
+    yarn add @sentry/sveltekit
+    ```
+
+    ```bash pnpm
+    pnpm add @sentry/sveltekit
+    ```
+    </CodeGroup>
+
+    **Current Version:** 10.42.0
+  </Step>
+
+  <Step title="Create Client Configuration">
+    Create `src/hooks.client.ts` (or `.js`):
+
+    ```typescript
+    import { handleErrorWithSentry, replayIntegration } from '@sentry/sveltekit';
+    import * as Sentry from '@sentry/sveltekit';
+
+    Sentry.init({
+      dsn: 'YOUR_DSN_HERE',
+      
+      tracesSampleRate: 1.0,
+      
+      replaysSessionSampleRate: 0.1,
+      replaysOnErrorSampleRate: 1.0,
+      
+      integrations: [
+        replayIntegration(),
+      ],
+    });
+
+    export const handleError = handleErrorWithSentry();
+    ```
+  </Step>
+
+  <Step title="Create Server Configuration">
+    Create `src/hooks.server.ts` (or `.js`):
+
+    ```typescript
+    import { handleErrorWithSentry, sentryHandle } from '@sentry/sveltekit';
+    import * as Sentry from '@sentry/sveltekit';
+import type { Handle } from '@sveltejs/kit';
+    import { sequence } from '@sveltejs/kit/hooks';
+
+    Sentry.init({
+      dsn: 'YOUR_DSN_HERE',
+      
+      tracesSampleRate: 1.0,
+    });
+
+    export const handle: Handle = sequence(
+      sentryHandle(),
+      // Add your other hooks here
+    );
+
+    export const handleError = handleErrorWithSentry();
+    ```
+  </Step>
+
+  <Step title="Configure Vite">
+    Update `vite.config.ts` to include Sentry's Vite plugin:
+
+    ```typescript
+    import { sveltekit } from '@sveltejs/kit/vite';
+    import { sentrySvelteKit } from '@sentry/sveltekit';
+    import { defineConfig } from 'vite';
+
+    export default defineConfig({
+      plugins: [
+        sentrySvelteKit({
+          sourceMapsUploadOptions: {
+            org: 'your-org',
+            project: 'your-project',
+            authToken: process.env.SENTRY_AUTH_TOKEN,
+          },
+        }),
+        sveltekit(),
+      ],
+    });
+    ```
+  </Step>
+
+  <Step title="Set Environment Variables">
+    Add your Sentry auth token to `.env`:
+
+    ```bash
+    SENTRY_AUTH_TOKEN=your_auth_token_here
+    ```
+
+    <Warning>
+      Never commit your `.env` file to version control. Add it to `.gitignore`.
+    </Warning>
+  </Step>
+
+  <Step title="Verify Installation">
+    Create a test page to verify Sentry is working:
+
+    ```svelte
+    <!-- src/routes/sentry-test/+page.svelte -->
+    <script>
+      import * as Sentry from '@sentry/sveltekit';
+
+      function triggerError() {
+        Sentry.captureException(new Error('Test error'));
+      }
+    </script>
+
+    <button on:click={triggerError}>
+      Trigger Test Error
+    </button>
+    ```
+
+    Visit the page and click the button. Check your Sentry dashboard to see the error.
+  </Step>
+</Steps>
+
+## Error Handling
+
+### Automatic Error Capture
+
+The SDK automatically captures:
+- Unhandled exceptions on both client and server
+- Errors in load functions
+- Errors in server endpoints
+- Errors in form actions
+
+### Custom Error Handling
+
+You can customize error handling:
+
+```typescript
+// src/hooks.server.ts
+import { handleErrorWithSentry } from '@sentry/sveltekit';
+import type { HandleServerError } from '@sveltejs/kit';
+
+export const handleError: HandleServerError = handleErrorWithSentry(
+  async ({ error, event, status, message }) => {
+    // Custom error handling logic
+    console.error('Server error:', error);
+    
+    return {
+      message: 'An error occurred',
+      errorId: crypto.randomUUID(),
+    };
+  }
+);
+```
+
+### Load Functions
+
+Errors in load functions are automatically captured:
+
+```typescript
+// src/routes/users/+page.ts
+import type { PageLoad } from './$types';
+
+export const load: PageLoad = async ({ fetch }) => {
+  // Errors here are automatically sent to Sentry
+  const response = await fetch('/api/users');
+  
+  if (!response.ok) {
+    throw new Error('Failed to load users');
+  }
+  
+  return {
+    users: await response.json(),
+  };
+};
+```
+
+## Performance Monitoring
+
+### Automatic Instrumentation
+
+The SDK automatically creates spans for:
+- Page loads
+- Navigation
+- Server requests
+- Load functions
+- Form actions
+
+### Custom Spans
+
+```typescript
+// src/routes/+page.server.ts
+import * as Sentry from '@sentry/sveltekit';
+import type { PageServerLoad } from './$types';
+
+export const load: PageServerLoad = async () => {
+  const data = await Sentry.startSpan(
+    { name: 'fetch-user-data', op: 'db.query' },
+    async () => {
+      return await db.user.findMany();
+    }
+  );
+  
+  return { users: data };
+};
+```
+
+## Server-Side Usage
+
+### Server Load Functions
+
+```typescript
+// src/routes/users/[id]/+page.server.ts
+import * as Sentry from '@sentry/sveltekit';
+import type { PageServerLoad } from './$types';
+
+export const load: PageServerLoad = async ({ params, fetch }) => {
+  try {
+    const user = await fetchUser(params.id);
+    return { user };
+  } catch (error) {
+    Sentry.captureException(error);
+    throw error;
+  }
+};
+```
+
+### Form Actions
+
+```typescript
+// src/routes/contact/+page.server.ts
+import * as Sentry from '@sentry/sveltekit';
+import type { Actions } from './$types';
+
+export const actions: Actions = {
+  default: async ({ request }) => {
+    try {
+      const data = await request.formData();
+      const email = data.get('email');
+      
+      await sendEmail(email);
+      
+      return { success: true };
+    } catch (error) {
+      Sentry.captureException(error);
+      return { success: false, error: 'Failed to send email' };
+    }
+  },
+};
+```
+
+### API Routes
+
+```typescript
+// src/routes/api/users/+server.ts
+import * as Sentry from '@sentry/sveltekit';
+import { json } from '@sveltejs/kit';
+import type { RequestHandler } from './$types';
+
+export const GET: RequestHandler = async () => {
+  try {
+    const users = await db.user.findMany();
+    return json(users);
+  } catch (error) {
+    Sentry.captureException(error);
+    return json({ error: 'Failed to fetch users' }, { status: 500 });
+  }
+};
+```
+
+## Client-Side Usage
+
+### In Svelte Components
+
+```svelte
+<!-- src/routes/+page.svelte -->
+<script lang="ts">
+  import * as Sentry from '@sentry/sveltekit';
+  import { onMount } from 'svelte';
+
+  onMount(() => {
+    Sentry.addBreadcrumb({
+      category: 'navigation',
+      message: 'User visited homepage',
+      level: 'info',
+    });
+  });
+
+  async function handleSubmit() {
+    try {
+      const response = await fetch('/api/submit', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      });
+      
+      if (!response.ok) {
+        throw new Error('Submission failed');
+      }
+    } catch (error) {
+      Sentry.captureException(error);
+    }
+  }
+</script>
+
+<button on:click={handleSubmit}>
+  Submit
+</button>
+```
+
+### Setting Context
+
+```typescript
+import * as Sentry from '@sentry/sveltekit';
+
+// Set user
+Sentry.setUser({
+  id: user.id,
+  email: user.email,
+  username: user.username,
+});
+
+// Set tags
+Sentry.setTag('page', $page.url.pathname);
+Sentry.setTag('locale', $page.data.locale);
+
+// Set extra context
+Sentry.setExtra('routeParams', $page.params);
+```
+
+## Session Replay
+
+Configure Session Replay in your client hooks:
+
+```typescript
+// src/hooks.client.ts
+import * as Sentry from '@sentry/sveltekit';
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  
+  integrations: [
+    Sentry.replayIntegration({
+      maskAllText: true,
+      blockAllMedia: true,
+      maskAllInputs: true,
+    }),
+  ],
+  
+  replaysSessionSampleRate: 0.1,
+  replaysOnErrorSampleRate: 1.0,
+});
+```
+
+## Adapter Compatibility
+
+The Sentry SvelteKit SDK is compatible with most SvelteKit adapters:
+
+- ✅ `@sveltejs/adapter-node`
+- ✅ `@sveltejs/adapter-vercel`
+- ✅ `@sveltejs/adapter-netlify`
+- ✅ `@sveltejs/adapter-cloudflare`
+- ✅ `@sveltejs/adapter-static`
+- ✅ `@sveltejs/adapter-auto`
+
+<Note>
+  Some adapters may require additional configuration. Check the [official documentation](https://docs.sentry.io/platforms/javascript/guides/sveltekit/#prerequisites) for adapter-specific setup.
+</Note>
+
+## Advanced Configuration
+
+### Environment Detection
+
+```typescript
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  environment: import.meta.env.MODE,
+  enabled: import.meta.env.PROD,
+});
+```
+
+### Sampling
+
+```typescript
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  
+  tracesSampler: (samplingContext) => {
+    // Don't sample health checks
+    if (samplingContext.request?.url?.includes('/health')) {
+      return 0;
+    }
+    
+    // Sample API routes at 50%
+    if (samplingContext.request?.url?.startsWith('/api')) {
+      return 0.5;
+    }
+    
+    return 0.1;
+  },
+});
+```
+
+### Custom Transport
+
+```typescript
+import { makeFetchTransport } from '@sentry/sveltekit';
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  transport: makeFetchTransport,
+});
+```
+
+## Source Maps
+
+Source maps are automatically handled by the Sentry Vite plugin when configured properly:
+
+```typescript
+// vite.config.ts
+import { sentrySvelteKit } from '@sentry/sveltekit';
+
+export default defineConfig({
+  plugins: [
+    sentrySvelteKit({
+      sourceMapsUploadOptions: {
+        org: 'your-org',
+        project: 'your-project',
+        authToken: process.env.SENTRY_AUTH_TOKEN,
+        
+        // Upload source maps only in production
+        enabled: process.env.NODE_ENV === 'production',
+        
+        // Clean up artifacts after upload
+        cleanArtifacts: true,
+      },
+    }),
+    sveltekit(),
+  ],
+});
+```
+
+## Troubleshooting
+
+### Errors Not Captured
+
+1. Ensure both `hooks.client.ts` and `hooks.server.ts` are configured
+2. Check that `handleError` is exported from both files
+3. Verify DSN is correct in both client and server configs
+
+### Source Maps Not Working
+
+1. Check `SENTRY_AUTH_TOKEN` is set correctly
+2. Verify `org` and `project` match your Sentry organization
+3. Ensure Vite is generating source maps (check `vite.config.ts`)
+
+### Performance Data Missing
+
+1. Ensure `tracesSampleRate` is greater than 0
+2. Check that `sentryHandle()` is in the hook sequence
+3. Verify Sentry is initialized before the app runs
+
+<Warning>
+  Make sure to call `Sentry.init()` in both `hooks.client.ts` and `hooks.server.ts` with appropriate configurations for each environment.
+</Warning>
+
+### Build Errors
+
+If you encounter build errors:
+
+1. Update to the latest `@sentry/sveltekit` version
+2. Ensure Vite is version 4.2 or newer
+3. Check SvelteKit version compatibility
+
+## Next Steps
+
+- Configure [Session Replay](/essentials/session-replay)
+- Set up [Performance Monitoring](/essentials/performance-monitoring)
+- Learn about [Error Boundaries](/essentials/error-boundaries)
+- Explore [Custom Instrumentation](/essentials/custom-instrumentation)
+
+## Related Documentation
+
+- [Official SvelteKit SDK Docs](https://docs.sentry.io/platforms/javascript/guides/sveltekit/)
+- [Sentry SvelteKit Package on npm](https://www.npmjs.com/package/@sentry/sveltekit)
+- [Source Code on GitHub](https://github.com/getsentry/sentry-javascript/tree/master/packages/sveltekit)

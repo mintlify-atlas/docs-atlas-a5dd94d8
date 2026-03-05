@@ -1,0 +1,536 @@
+---
+title: "captureEvent"
+description: "Capture custom events with full control over event structure"
+---
+
+The `captureEvent` function allows you to manually create and send custom events to Sentry with complete control over the event structure.
+
+## Function Signature
+
+```typescript
+export function captureEvent(
+  event: Event,
+  captureContext?: CaptureContext
+): string
+```
+
+## Parameters
+
+<ParamField path="event" type="Event" required>
+  The event object to capture. See [Event Types](/api/types/event) for the complete structure.
+</ParamField>
+
+<ParamField path="captureContext" type="CaptureContext">
+  Additional context to merge with the event. Can be:
+  - A Scope object
+  - A partial ScopeContext object  
+  - A callback function receiving the current scope
+</ParamField>
+
+## Returns
+
+<ResponseField name="eventId" type="string">
+  The unique ID of the captured event.
+</ResponseField>
+
+## Basic Usage
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+const eventId = Sentry.captureEvent({
+  message: 'Custom event',
+  level: 'info',
+  tags: {
+    custom: 'true'
+  }
+});
+```
+
+## Event Structure
+
+```typescript
+export interface Event {
+  event_id?: string;
+  message?: string;
+  timestamp?: number;
+  start_timestamp?: number;
+  level?: SeverityLevel;
+  platform?: string;
+  logger?: string;
+  server_name?: string;
+  release?: string;
+  dist?: string;
+  environment?: string;
+  sdk?: SdkInfo;
+  request?: RequestEventData;
+  transaction?: string;
+  modules?: { [key: string]: string };
+  fingerprint?: string[];
+  exception?: {
+    values?: Exception[];
+  };
+  breadcrumbs?: Breadcrumb[];
+  contexts?: Contexts;
+  tags?: { [key: string]: Primitive };
+  extra?: Extras;
+  user?: User;
+  type?: EventType;
+  spans?: SpanJSON[];
+  measurements?: Measurements;
+}
+```
+
+## Custom Event Examples
+
+### Application Performance Event
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+Sentry.captureEvent({
+  message: 'Application Performance Report',
+  level: 'info',
+  tags: {
+    metric_type: 'performance',
+    region: 'us-east-1'
+  },
+  contexts: {
+    performance: {
+      cpu_usage: 45.2,
+      memory_usage: 78.5,
+      response_time_p95: 450
+    }
+  },
+  measurements: {
+    'memory.used': {
+      value: 512.5,
+      unit: 'megabyte'
+    },
+    'cpu.utilization': {
+      value: 45.2,
+      unit: 'percent'
+    }
+  },
+  timestamp: Date.now() / 1000
+});
+```
+
+### Business Event
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+function trackPurchase(order: Order) {
+  Sentry.captureEvent({
+    message: 'Purchase Completed',
+    level: 'info',
+    tags: {
+      event_type: 'business',
+      payment_method: order.paymentMethod,
+      order_type: order.type
+    },
+    user: {
+      id: order.userId,
+      email: order.userEmail
+    },
+    contexts: {
+      purchase: {
+        order_id: order.id,
+        amount: order.amount,
+        currency: order.currency,
+        items_count: order.items.length
+      }
+    },
+    extra: {
+      order_details: order,
+      processing_time_ms: order.processingTime
+    },
+    timestamp: Date.now() / 1000
+  });
+}
+```
+
+### Security Event
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+function logSecurityEvent(
+  eventType: string,
+  details: Record<string, any>
+) {
+  Sentry.captureEvent({
+    message: `Security: ${eventType}`,
+    level: 'warning',
+    tags: {
+      security_event: eventType,
+      severity: 'high'
+    },
+    user: details.user && {
+      id: details.user.id,
+      ip_address: details.ip
+    },
+    contexts: {
+      security: {
+        event_type: eventType,
+        timestamp: new Date().toISOString(),
+        source_ip: details.ip,
+        user_agent: details.userAgent
+      }
+    },
+    extra: details,
+    fingerprint: ['security', eventType, details.ip]
+  });
+}
+
+logSecurityEvent('failed_login_attempt', {
+  ip: '192.168.1.1',
+  user: { id: 'user-123' },
+  userAgent: 'Mozilla/5.0...',
+  attempts: 5
+});
+```
+
+### Custom Exception Event
+
+```typescript
+import * as Sentry from '@sentry/node';
+import { parseStackFrames } from './stack-parser';
+
+function reportCustomError(error: CustomError) {
+  Sentry.captureEvent({
+    level: 'error',
+    exception: {
+      values: [{
+        type: error.type,
+        value: error.message,
+        stacktrace: {
+          frames: parseStackFrames(error.stack)
+        },
+        mechanism: {
+          type: 'generic',
+          handled: true
+        }
+      }]
+    },
+    tags: {
+      error_code: error.code,
+      component: error.component
+    },
+    contexts: {
+      error_details: {
+        code: error.code,
+        retry_count: error.retries,
+        recoverable: error.recoverable
+      }
+    },
+    fingerprint: ['custom-error', error.type, error.code]
+  });
+}
+```
+
+## With Request Context
+
+```typescript
+import * as Sentry from '@sentry/node';
+import type { Request } from 'express';
+
+function captureRequestEvent(req: Request, message: string) {
+  Sentry.captureEvent({
+    message,
+    level: 'info',
+    request: {
+      url: req.url,
+      method: req.method,
+      headers: req.headers,
+      query_string: req.query,
+      data: req.body,
+      cookies: req.cookies,
+      env: {
+        REMOTE_ADDR: req.ip,
+        SERVER_NAME: req.hostname
+      }
+    },
+    tags: {
+      route: req.route?.path,
+      method: req.method
+    }
+  });
+}
+```
+
+## With Breadcrumbs
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+Sentry.captureEvent({
+  message: 'Checkout process completed',
+  level: 'info',
+  breadcrumbs: [
+    {
+      type: 'navigation',
+      category: 'ui',
+      message: 'User navigated to cart',
+      level: 'info',
+      timestamp: Date.now() / 1000 - 10
+    },
+    {
+      type: 'http',
+      category: 'fetch',
+      message: 'GET /api/cart',
+      level: 'info',
+      data: { status_code: 200 },
+      timestamp: Date.now() / 1000 - 8
+    },
+    {
+      type: 'user',
+      category: 'action',
+      message: 'User clicked checkout',
+      level: 'info',
+      timestamp: Date.now() / 1000 - 5
+    }
+  ]
+});
+```
+
+## With Attachments
+
+```typescript
+import * as Sentry from '@sentry/node';
+import * as fs from 'fs';
+
+const logData = fs.readFileSync('./error.log');
+
+Sentry.captureEvent(
+  {
+    message: 'System error with logs',
+    level: 'error'
+  },
+  {
+    attachments: [
+      {
+        filename: 'error.log',
+        data: logData,
+        contentType: 'text/plain'
+      }
+    ]
+  }
+);
+```
+
+## Implementation Details
+
+From `packages/core/src/client.ts`:
+
+```typescript
+public captureEvent(
+  event: Event,
+  hint?: EventHint,
+  currentScope?: Scope
+): string {
+  const eventId = uuid4();
+
+  // Ensure we haven't captured this very object before
+  if (hint?.originalException && 
+      checkOrSetAlreadyCaught(hint.originalException)) {
+    DEBUG_BUILD && debug.log(ALREADY_SEEN_ERROR);
+    return eventId;
+  }
+
+  const hintWithEventId = {
+    event_id: eventId,
+    ...hint,
+  };
+
+  const sdkProcessingMetadata = event.sdkProcessingMetadata || {};
+  const capturedSpanScope = sdkProcessingMetadata.capturedSpanScope;
+  const capturedSpanIsolationScope = 
+    sdkProcessingMetadata.capturedSpanIsolationScope;
+  const dataCategory = getDataCategoryByType(event.type);
+
+  this._process(
+    () => this._captureEvent(
+      event, 
+      hintWithEventId, 
+      capturedSpanScope || currentScope,
+      capturedSpanIsolationScope
+    ),
+    dataCategory,
+  );
+
+  return hintWithEventId.event_id;
+}
+```
+
+## Event Types
+
+```typescript
+export type EventType = 
+  | 'transaction' 
+  | 'profile' 
+  | 'replay_event' 
+  | 'feedback' 
+  | undefined; // undefined = error event
+```
+
+### Error Event
+
+```typescript
+Sentry.captureEvent({
+  message: 'Error occurred',
+  level: 'error',
+  // type is undefined for error events
+});
+```
+
+### Transaction Event
+
+```typescript
+Sentry.captureEvent({
+  type: 'transaction',
+  transaction: 'GET /api/users',
+  start_timestamp: startTime,
+  timestamp: endTime,
+  spans: [/* ... */]
+});
+```
+
+## Fingerprinting
+
+Control event grouping with fingerprints:
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+// Default grouping
+Sentry.captureEvent({
+  message: 'Database error',
+  fingerprint: ['{{ default }}']
+});
+
+// Custom grouping
+Sentry.captureEvent({
+  message: 'Database connection failed',
+  fingerprint: ['database', 'connection', process.env.DB_HOST]
+});
+
+// Force separate issues
+Sentry.captureEvent({
+  message: 'API timeout',
+  fingerprint: ['api-timeout', Date.now().toString()]
+});
+```
+
+## Context Merging
+
+When using `captureContext`, data is merged with the event:
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+Sentry.captureEvent(
+  {
+    message: 'Base event',
+    tags: { source: 'app' }
+  },
+  {
+    tags: { environment: 'production' },
+    extra: { timestamp: Date.now() }
+  }
+);
+
+// Resulting event has:
+// tags: { source: 'app', environment: 'production' }
+// extra: { timestamp: 1234567890 }
+```
+
+## Best Practices
+
+### 1. Include Timestamps
+
+```typescript
+Sentry.captureEvent({
+  message: 'Event',
+  timestamp: Date.now() / 1000 // Unix timestamp in seconds
+});
+```
+
+### 2. Use Appropriate Levels
+
+```typescript
+// Fatal: System crashes
+Sentry.captureEvent({ message: 'Out of memory', level: 'fatal' });
+
+// Error: Errors requiring attention
+Sentry.captureEvent({ message: 'Payment failed', level: 'error' });
+
+// Warning: Potential issues
+Sentry.captureEvent({ message: 'High latency', level: 'warning' });
+
+// Info: Informational events
+Sentry.captureEvent({ message: 'User signup', level: 'info' });
+```
+
+### 3. Add Context
+
+```typescript
+Sentry.captureEvent({
+  message: 'Event',
+  contexts: {
+    app: { /* app context */ },
+    device: { /* device context */ },
+    custom: { /* custom data */ }
+  }
+});
+```
+
+### 4. Tag for Filtering
+
+```typescript
+Sentry.captureEvent({
+  message: 'Event',
+  tags: {
+    feature: 'checkout',
+    version: '2.0.0',
+    region: 'us-west'
+  }
+});
+```
+
+## Validation
+
+Events are validated before sending:
+
+```typescript
+// Valid event
+Sentry.captureEvent({
+  message: 'Valid event',
+  level: 'info'
+});
+
+// Event with invalid data will be normalized
+Sentry.captureEvent({
+  message: 'Event',
+  tags: {
+    // Very long strings are truncated
+    long_tag: 'x'.repeat(10000)
+  },
+  extra: {
+    // Circular references are handled
+    circular: (() => {
+      const obj: any = {};
+      obj.self = obj;
+      return obj;
+    })()
+  }
+});
+```
+
+## Related
+
+- [Event Types](/api/types/event)
+- [captureException](/api/capture/exception)
+- [captureMessage](/api/capture/message)
+- [Scope](/api/core/scope)

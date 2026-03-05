@@ -1,0 +1,638 @@
+---
+title: OpenTelemetry Integration
+description: Integrate Sentry with OpenTelemetry for standardized observability
+---
+
+Sentry's JavaScript SDK v8+ is built on OpenTelemetry, the industry-standard observability framework. This enables seamless integration with OpenTelemetry tooling and standardized instrumentation.
+
+## Why OpenTelemetry?
+
+OpenTelemetry (OTel) provides:
+
+- **Standardized instrumentation** across languages and frameworks
+- **Vendor-neutral data collection** 
+- **Automatic instrumentation** for common libraries
+- **Distributed tracing** across services
+- **Rich ecosystem** of integrations
+
+## Automatic OpenTelemetry Integration
+
+In SDK v8+, OpenTelemetry is used automatically:
+
+```javascript
+import * as Sentry from '@sentry/node';
+
+// Sentry initialization automatically sets up OpenTelemetry
+Sentry.init({
+  dsn: '__DSN__',
+  tracesSampleRate: 1.0,
+  // OpenTelemetry instrumentation happens automatically
+});
+
+import express from 'express';
+const app = express();
+
+// Express routes are automatically instrumented via OpenTelemetry
+app.get('/users', async (req, res) => {
+  // This is automatically traced
+  const users = await db.query('SELECT * FROM users');
+  res.json(users);
+});
+```
+
+<Tip>
+In Node.js SDK v8+, you MUST initialize Sentry before any other imports for OpenTelemetry auto-instrumentation to work.
+</Tip>
+
+## Available Auto-Instrumentations
+
+The SDK automatically includes OpenTelemetry instrumentations for:
+
+### HTTP & Networking
+- `httpIntegration` - HTTP/HTTPS requests
+- `nativeNodeFetchIntegration` - Native fetch API
+
+### Frameworks
+- `expressIntegration` - Express.js
+- `fastifyIntegration` - Fastify
+- `hapiIntegration` - Hapi
+- `nestIntegration` - Nest.js
+
+### Databases
+- `prismaIntegration` - Prisma ORM
+- `mongoIntegration` - MongoDB
+- `mongooseIntegration` - Mongoose
+- `mysqlIntegration` - MySQL
+- `mysql2Integration` - MySQL2
+- `postgresIntegration` - PostgreSQL
+- `redisIntegration` - Redis (ioredis)
+
+### GraphQL
+- `graphqlIntegration` - GraphQL operations
+
+## Custom OpenTelemetry Instrumentations
+
+Add custom OpenTelemetry instrumentations:
+
+```javascript
+import * as Sentry from '@sentry/node';
+import { GenericPoolInstrumentation } from '@opentelemetry/instrumentation-generic-pool';
+
+Sentry.init({
+  dsn: '__DSN__',
+  openTelemetryInstrumentations: [
+    new GenericPoolInstrumentation(),
+  ],
+});
+```
+
+### Common Third-Party Instrumentations
+
+```javascript
+import { KafkaJsInstrumentation } from '@opentelemetry/instrumentation-kafkajs';
+import { PinoInstrumentation } from '@opentelemetry/instrumentation-pino';
+import { WinstonInstrumentation } from '@opentelemetry/instrumentation-winston';
+
+Sentry.init({
+  dsn: '__DSN__',
+  openTelemetryInstrumentations: [
+    new KafkaJsInstrumentation(),
+    new PinoInstrumentation(),
+    new WinstonInstrumentation(),
+  ],
+});
+```
+
+## Working with OpenTelemetry API
+
+### Using OpenTelemetry Spans
+
+You can use both Sentry and OpenTelemetry APIs:
+
+```javascript
+import { trace } from '@opentelemetry/api';
+import * as Sentry from '@sentry/node';
+
+// Sentry API (recommended)
+Sentry.startSpan({ name: 'my-operation' }, () => {
+  // Work here
+});
+
+// OpenTelemetry API (also works)
+const tracer = trace.getTracer('my-app');
+tracer.startActiveSpan('my-operation', (span) => {
+  // Work here
+  span.end();
+});
+```
+
+### Getting Active Span
+
+```javascript
+import { getActiveSpan } from '@sentry/node';
+import { trace } from '@opentelemetry/api';
+
+// Sentry API
+const sentrySpan = getActiveSpan();
+
+// OpenTelemetry API
+const otelSpan = trace.getActiveSpan();
+```
+
+### Adding Span Attributes
+
+```javascript
+import { startSpan } from '@sentry/node';
+
+startSpan({ name: 'process-order' }, (span) => {
+  // Sentry-style
+  span.setAttribute('order.id', orderId);
+  span.setAttribute('order.total', total);
+  
+  // OpenTelemetry semantic conventions
+  span.setAttribute('db.system', 'postgresql');
+  span.setAttribute('db.operation', 'SELECT');
+});
+```
+
+## Semantic Conventions
+
+Use OpenTelemetry semantic conventions for consistency:
+
+### HTTP Spans
+
+```javascript
+startSpan(
+  {
+    name: 'GET /api/users',
+    op: 'http.server',
+    attributes: {
+      'http.method': 'GET',
+      'http.route': '/api/users',
+      'http.scheme': 'https',
+      'http.target': '/api/users?page=1',
+      'http.status_code': 200,
+    },
+  },
+  () => {
+    // Handle request
+  }
+);
+```
+
+### Database Spans
+
+```javascript
+startSpan(
+  {
+    name: 'SELECT users',
+    op: 'db.query',
+    attributes: {
+      'db.system': 'postgresql',
+      'db.operation': 'SELECT',
+      'db.statement': 'SELECT * FROM users WHERE id = $1',
+      'db.name': 'myapp_db',
+    },
+  },
+  async () => {
+    return await db.query('SELECT * FROM users WHERE id = $1', [userId]);
+  }
+);
+```
+
+### RPC/GraphQL Spans
+
+```javascript
+startSpan(
+  {
+    name: 'getUser',
+    op: 'graphql.query',
+    attributes: {
+      'graphql.operation.name': 'getUser',
+      'graphql.operation.type': 'query',
+    },
+  },
+  () => {
+    // Execute query
+  }
+);
+```
+
+## Custom Context Propagation
+
+Control how trace context is propagated:
+
+```javascript
+import { continueTrace } from '@sentry/node';
+
+// Extract trace context from headers
+const sentryTrace = req.headers['sentry-trace'];
+const baggage = req.headers['baggage'];
+
+continueTrace({ sentryTrace, baggage }, () => {
+  // This continues the trace
+  Sentry.startSpan({ name: 'handle-request' }, () => {
+    // Work here
+  });
+});
+```
+
+### W3C Trace Context
+
+Sentry supports W3C Trace Context:
+
+```javascript
+import { continueTrace } from '@sentry/node';
+
+// W3C traceparent header
+const traceparent = req.headers['traceparent'];
+const tracestate = req.headers['tracestate'];
+
+continueTrace({
+  sentryTrace: traceparent,
+  baggage: tracestate,
+}, () => {
+  // Continue trace
+});
+```
+
+## Distributed Tracing
+
+Connect traces across services:
+
+### Service A (Node.js)
+
+```javascript
+import * as Sentry from '@sentry/node';
+import fetch from 'node-fetch';
+
+Sentry.init({
+  dsn: '__DSN__',
+  tracePropagationTargets: ['https://service-b.example.com'],
+});
+
+app.get('/api/data', async (req, res) => {
+  // Automatically propagates trace to service-b
+  const response = await fetch('https://service-b.example.com/data');
+  const data = await response.json();
+  res.json(data);
+});
+```
+
+### Service B (Node.js)
+
+```javascript
+import * as Sentry from '@sentry/node';
+
+Sentry.init({
+  dsn: '__DSN__',
+  // Automatically continues traces from service-a
+});
+
+app.get('/data', (req, res) => {
+  // This span is part of the distributed trace
+  res.json({ message: 'data' });
+});
+```
+
+## OpenTelemetry Exporters
+
+Export to multiple backends:
+
+```javascript
+import * as Sentry from '@sentry/node';
+import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
+import { JaegerExporter } from '@opentelemetry/exporter-jaeger';
+import { BatchSpanProcessor } from '@opentelemetry/sdk-trace-base';
+
+// Custom OpenTelemetry setup
+const provider = new NodeTracerProvider();
+
+// Add Jaeger exporter
+provider.addSpanProcessor(
+  new BatchSpanProcessor(new JaegerExporter())
+);
+
+provider.register();
+
+// Initialize Sentry (uses the registered provider)
+Sentry.init({
+  dsn: '__DSN__',
+  skipOpenTelemetrySetup: true, // Skip Sentry's OTel setup
+});
+```
+
+<Warning>
+When `skipOpenTelemetrySetup: true`, you must configure OpenTelemetry yourself. Automatic instrumentations won't work.
+</Warning>
+
+## Filtering OpenTelemetry Spans
+
+Control which spans are created:
+
+```javascript
+import { httpIntegration } from '@sentry/node';
+
+Sentry.init({
+  dsn: '__DSN__',
+  integrations: [
+    httpIntegration({
+      tracing: {
+        // Don't create spans for certain URLs
+        shouldCreateSpanForRequest: (url) => {
+          return !url.includes('/health') && !url.includes('/metrics');
+        },
+      },
+    }),
+  ],
+});
+```
+
+## Performance Optimization
+
+### Disable Unnecessary Instrumentations
+
+```javascript
+import { httpIntegration } from '@sentry/node';
+
+Sentry.init({
+  dsn: '__DSN__',
+  integrations: [
+    // Disable HTTP spans if not needed
+    httpIntegration({ spans: false }),
+  ],
+});
+```
+
+### Sampling
+
+Control sampling at the OpenTelemetry level:
+
+```javascript
+import { ParentBasedSampler, TraceIdRatioBasedSampler } from '@opentelemetry/sdk-trace-base';
+
+Sentry.init({
+  dsn: '__DSN__',
+  tracesSampleRate: 0.1, // Sentry-level sampling
+  
+  // Or use custom OTel sampler
+  // (requires skipOpenTelemetrySetup: true)
+});
+```
+
+## Accessing OpenTelemetry Context
+
+```javascript
+import { context, trace } from '@opentelemetry/api';
+import { getActiveSpan } from '@sentry/node';
+
+// Get active span
+const span = getActiveSpan();
+
+// Get span context
+if (span) {
+  const spanContext = span.spanContext();
+  console.log('Trace ID:', spanContext.traceId);
+  console.log('Span ID:', spanContext.spanId);
+  console.log('Trace flags:', spanContext.traceFlags);
+}
+
+// Access OpenTelemetry context
+const ctx = context.active();
+const otelSpan = trace.getSpan(ctx);
+```
+
+## Best Practices
+
+<Accordion title="Use Sentry APIs when possible">
+  Sentry APIs (`startSpan`, `getActiveSpan`) are easier and integrate better:
+  
+  ```javascript
+  // ✅ Recommended
+  Sentry.startSpan({ name: 'operation' }, () => {});
+  
+  // ❌ Less ideal
+  const tracer = trace.getTracer('app');
+  tracer.startActiveSpan('operation', (span) => {
+    span.end();
+  });
+  ```
+</Accordion>
+
+<Accordion title="Follow semantic conventions">
+  Use OpenTelemetry semantic conventions for consistency:
+  
+  ```javascript
+  span.setAttribute('http.method', 'GET');
+  span.setAttribute('http.status_code', 200);
+  span.setAttribute('db.system', 'postgresql');
+  ```
+  
+  See [OpenTelemetry Semantic Conventions](https://opentelemetry.io/docs/specs/semconv/)
+</Accordion>
+
+<Accordion title="Initialize Sentry first">
+  Always initialize Sentry before other imports:
+  
+  ```javascript
+  // ✅ Correct
+  import * as Sentry from '@sentry/node';
+  Sentry.init({ dsn: '__DSN__' });
+  import express from 'express';
+  
+  // ❌ Wrong
+  import express from 'express';
+  import * as Sentry from '@sentry/node';
+  Sentry.init({ dsn: '__DSN__' });
+  ```
+</Accordion>
+
+<Accordion title="Don't mix setup approaches">
+  Either use Sentry's auto-setup OR custom OpenTelemetry setup, not both:
+  
+  ```javascript
+  // ✅ Auto-setup (recommended)
+  Sentry.init({ dsn: '__DSN__' });
+  
+  // ✅ Custom setup
+  // Set up OpenTelemetry manually
+  Sentry.init({
+    dsn: '__DSN__',
+    skipOpenTelemetrySetup: true,
+  });
+  
+  // ❌ Don't mix
+  // Set up OpenTelemetry manually
+  Sentry.init({ dsn: '__DSN__' }); // Also tries to setup OTel
+  ```
+</Accordion>
+
+## Troubleshooting
+
+<Accordion title="Spans not appearing in Sentry">
+  **Symptoms:** No performance data in Sentry
+  
+  **Solutions:**
+  1. Ensure `tracesSampleRate` is set
+  2. Initialize Sentry before all imports
+  3. Check console for errors
+  4. Verify instrumentations are loaded
+</Accordion>
+
+<Accordion title="Duplicate spans">
+  **Symptoms:** Same operation shows multiple spans
+  
+  **Solution:** You may be using both Sentry and OTel APIs. Pick one:
+  
+  ```javascript
+  // Use Sentry API
+  Sentry.startSpan({ name: 'op' }, () => {});
+  
+  // OR use OTel API (not both)
+  trace.getTracer('app').startActiveSpan('op', (s) => s.end());
+  ```
+</Accordion>
+
+<Accordion title="Context not propagating">
+  **Symptoms:** Distributed traces disconnected
+  
+  **Solutions:**
+  1. Set `tracePropagationTargets`
+  2. Ensure services use same trace headers
+  3. Check CORS allows trace headers
+</Accordion>
+
+<Accordion title="High overhead from instrumentation">
+  **Solutions:**
+  1. Lower `tracesSampleRate`
+  2. Disable unused instrumentations
+  3. Use `shouldCreateSpanForRequest` to filter
+</Accordion>
+
+## Complete Example
+
+```javascript
+// server.ts
+import * as Sentry from '@sentry/node';
+import { KafkaJsInstrumentation } from '@opentelemetry/instrumentation-kafkajs';
+
+// Initialize Sentry FIRST
+Sentry.init({
+  dsn: '__DSN__',
+  environment: process.env.NODE_ENV,
+  tracesSampleRate: 0.1,
+  
+  // Add custom OpenTelemetry instrumentations
+  openTelemetryInstrumentations: [
+    new KafkaJsInstrumentation(),
+  ],
+  
+  // Configure integrations
+  integrations: [
+    Sentry.httpIntegration({
+      tracing: {
+        shouldCreateSpanForRequest: (url) => {
+          return !url.includes('/health');
+        },
+      },
+    }),
+    Sentry.prismaIntegration(),
+    Sentry.graphqlIntegration(),
+  ],
+  
+  // Propagate to other services
+  tracePropagationTargets: [
+    'localhost',
+    /^https:\/\/api\.example\.com/,
+  ],
+});
+
+// Now import other modules
+import express from 'express';
+import { PrismaClient } from '@prisma/client';
+
+const app = express();
+const prisma = new PrismaClient();
+
+app.get('/users/:id', async (req, res) => {
+  // Automatically traced by Express integration
+  const userId = req.params.id;
+  
+  // Custom span
+  const user = await Sentry.startSpan(
+    {
+      name: 'fetch-user-with-posts',
+      op: 'db.query',
+      attributes: {
+        'user.id': userId,
+      },
+    },
+    async (span) => {
+      // Prisma query - automatically instrumented
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        include: { posts: true },
+      });
+      
+      span.setAttribute('posts.count', user.posts.length);
+      
+      return user;
+    }
+  );
+  
+  res.json(user);
+});
+
+app.listen(3000);
+```
+
+## Migration from OpenTelemetry
+
+If you're already using OpenTelemetry:
+
+```javascript
+// Before (pure OpenTelemetry)
+import { trace } from '@opentelemetry/api';
+import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
+import { SimpleSpanProcessor } from '@opentelemetry/sdk-trace-base';
+import { JaegerExporter } from '@opentelemetry/exporter-jaeger';
+
+const provider = new NodeTracerProvider();
+provider.addSpanProcessor(new SimpleSpanProcessor(new JaegerExporter()));
+provider.register();
+
+const tracer = trace.getTracer('my-app');
+
+// After (with Sentry)
+import * as Sentry from '@sentry/node';
+
+Sentry.init({
+  dsn: '__DSN__',
+  // Sentry handles OpenTelemetry setup
+});
+
+// Use Sentry APIs (simpler)
+Sentry.startSpan({ name: 'operation' }, () => {});
+
+// Or continue using OTel APIs (still works)
+import { trace } from '@opentelemetry/api';
+const tracer = trace.getTracer('my-app');
+```
+
+## Resources
+
+- [OpenTelemetry JavaScript SDK](https://opentelemetry.io/docs/languages/js/)
+- [OpenTelemetry Semantic Conventions](https://opentelemetry.io/docs/specs/semconv/)
+- [OpenTelemetry Registry](https://opentelemetry.io/ecosystem/registry/)
+- [Sentry OpenTelemetry Docs](https://docs.sentry.io/platforms/javascript/opentelemetry/)
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Custom Integrations" href="/guides/advanced/custom-integrations">
+    Build custom integrations
+  </Card>
+  <Card title="Performance Monitoring" href="/guides/best-practices/performance">
+    Best practices for performance
+  </Card>
+</CardGroup>

@@ -1,0 +1,545 @@
+---
+title: Tunneling
+description: Route Sentry events through your backend to avoid ad blockers and CORS issues
+---
+
+Tunneling routes Sentry events through your backend server instead of sending them directly from the browser. This prevents ad blockers from blocking Sentry and avoids CORS issues.
+
+## Why Use Tunneling?
+
+### Ad Blocker Prevention
+
+Ad blockers often block requests to `sentry.io`, preventing error reporting:
+
+```javascript
+// Direct request (may be blocked)
+fetch('https://o123.ingest.sentry.io/api/456/envelope/', {
+  // Blocked by ad blockers
+});
+```
+
+### CORS Issues
+
+Some browsers or configurations have strict CORS policies that block cross-origin requests to Sentry.
+
+### Content Security Policy
+
+CSP rules may prevent connections to external domains.
+
+## How Tunneling Works
+
+```
+Browser --> Your Backend --> Sentry
+```
+
+1. Browser sends events to your backend (e.g., `/api/sentry-tunnel`)
+2. Backend forwards events to Sentry
+3. Sentry processes events normally
+
+## Quick Setup
+
+### 1. Configure SDK
+
+```javascript
+import * as Sentry from '@sentry/browser';
+
+Sentry.init({
+  dsn: '__DSN__',
+  tunnel: '/api/sentry-tunnel', // Your backend endpoint
+});
+```
+
+### 2. Create Backend Endpoint
+
+#### Next.js API Route
+
+```javascript
+// pages/api/sentry-tunnel.ts
+import { NextApiRequest, NextApiResponse } from 'next';
+
+export default async function handler(
+  req: NextApiRequest,
+  res: NextApiResponse
+) {
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  try {
+    const envelope = req.body;
+    const pieces = envelope.split('\n');
+    const header = JSON.parse(pieces[0]);
+
+    // Extract DSN from envelope header
+    const dsn = new URL(header.dsn);
+    const projectId = dsn.pathname.replace('/', '');
+
+    // Forward to Sentry
+    const sentryResponse = await fetch(
+      `https://${dsn.host}/api/${projectId}/envelope/`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': req.headers['content-type'] || 'application/x-sentry-envelope',
+        },
+        body: envelope,
+      }
+    );
+
+    // Return Sentry's response
+    res.status(sentryResponse.status).send(await sentryResponse.text());
+  } catch (error) {
+    console.error('Tunnel error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+}
+
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: '1mb',
+    },
+  },
+};
+```
+
+#### Express.js
+
+```javascript
+import express from 'express';
+import fetch from 'node-fetch';
+
+const app = express();
+
+app.post('/api/sentry-tunnel', express.text({ type: '*/*' }), async (req, res) => {
+  try {
+    const envelope = req.body;
+    const pieces = envelope.split('\n');
+    const header = JSON.parse(pieces[0]);
+
+    const dsn = new URL(header.dsn);
+    const projectId = dsn.pathname.replace('/', '');
+
+    const sentryResponse = await fetch(
+      `https://${dsn.host}/api/${projectId}/envelope/`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': req.headers['content-type'] || 'application/x-sentry-envelope',
+        },
+        body: envelope,
+      }
+    );
+
+    res.status(sentryResponse.status).send(await sentryResponse.text());
+  } catch (error) {
+    console.error('Tunnel error:', error);
+    res.status(500).send('Internal server error');
+  }
+});
+```
+
+#### SvelteKit
+
+```javascript
+// src/routes/api/sentry-tunnel/+server.ts
+import type { RequestHandler } from './$types';
+
+export const POST: RequestHandler = async ({ request }) => {
+  try {
+    const envelope = await request.text();
+    const pieces = envelope.split('\n');
+    const header = JSON.parse(pieces[0]);
+
+    const dsn = new URL(header.dsn);
+    const projectId = dsn.pathname.replace('/', '');
+
+    const sentryResponse = await fetch(
+      `https://${dsn.host}/api/${projectId}/envelope/`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': request.headers.get('content-type') || 'application/x-sentry-envelope',
+        },
+        body: envelope,
+      }
+    );
+
+    return new Response(await sentryResponse.text(), {
+      status: sentryResponse.status,
+    });
+  } catch (error) {
+    console.error('Tunnel error:', error);
+    return new Response('Internal server error', { status: 500 });
+  }
+};
+```
+
+## Security Considerations
+
+### Validate DSN
+
+Only forward to known Sentry projects:
+
+```javascript
+const ALLOWED_DSNS = [
+  'https://abc123@o456.ingest.sentry.io/789',
+  'https://def456@o456.ingest.sentry.io/012',
+];
+
+app.post('/api/sentry-tunnel', async (req, res) => {
+  const envelope = req.body;
+  const pieces = envelope.split('\n');
+  const header = JSON.parse(pieces[0]);
+
+  // Validate DSN
+  if (!ALLOWED_DSNS.includes(header.dsn)) {
+    return res.status(403).json({ error: 'Invalid DSN' });
+  }
+
+  // Forward to Sentry...
+});
+```
+
+### Rate Limiting
+
+Prevent abuse:
+
+```javascript
+import rateLimit from 'express-rate-limit';
+
+const limiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 100, // 100 requests per minute
+  message: 'Too many requests',
+});
+
+app.post('/api/sentry-tunnel', limiter, async (req, res) => {
+  // Handle request...
+});
+```
+
+### Size Limits
+
+Limit payload size:
+
+```javascript
+app.post('/api/sentry-tunnel',
+  express.text({ type: '*/*', limit: '500kb' }),
+  async (req, res) => {
+    // Handle request...
+  }
+);
+```
+
+## Advanced Configurations
+
+### Multiple Projects
+
+Support multiple Sentry projects:
+
+```javascript
+const PROJECT_CONFIGS = {
+  'frontend': 'https://abc@o123.ingest.sentry.io/456',
+  'backend': 'https://def@o123.ingest.sentry.io/789',
+};
+
+app.post('/api/sentry-tunnel/:project', async (req, res) => {
+  const projectKey = req.params.project;
+  const allowedDsn = PROJECT_CONFIGS[projectKey];
+
+  if (!allowedDsn) {
+    return res.status(404).json({ error: 'Project not found' });
+  }
+
+  const envelope = req.body;
+  const pieces = envelope.split('\n');
+  const header = JSON.parse(pieces[0]);
+
+  // Verify DSN matches expected project
+  if (header.dsn !== allowedDsn) {
+    return res.status(403).json({ error: 'DSN mismatch' });
+  }
+
+  // Forward to Sentry...
+});
+```
+
+### Filtering Events
+
+Filter events before forwarding:
+
+```javascript
+app.post('/api/sentry-tunnel', async (req, res) => {
+  const envelope = req.body;
+  const pieces = envelope.split('\n');
+
+  // Parse envelope items
+  for (let i = 1; i < pieces.length; i += 2) {
+    if (!pieces[i]) continue;
+
+    const itemHeader = JSON.parse(pieces[i]);
+    const itemBody = pieces[i + 1] ? JSON.parse(pieces[i + 1]) : null;
+
+    // Filter based on event type
+    if (itemHeader.type === 'event' && itemBody) {
+      // Skip test events
+      if (itemBody.message?.includes('test')) {
+        return res.status(200).send('Filtered');
+      }
+    }
+  }
+
+  // Forward to Sentry...
+});
+```
+
+### Adding Server Context
+
+Enrich events with server-side data:
+
+```javascript
+app.post('/api/sentry-tunnel', async (req, res) => {
+  const envelope = req.body;
+  const pieces = envelope.split('\n');
+  const modifiedPieces = [pieces[0]]; // Keep header
+
+  for (let i = 1; i < pieces.length; i += 2) {
+    if (!pieces[i]) continue;
+
+    const itemHeader = JSON.parse(pieces[i]);
+    let itemBody = pieces[i + 1] ? JSON.parse(pieces[i + 1]) : null;
+
+    if (itemHeader.type === 'event' && itemBody) {
+      // Add server context
+      itemBody.tags = {
+        ...itemBody.tags,
+        server_region: process.env.AWS_REGION,
+        server_version: process.env.APP_VERSION,
+      };
+
+      // Add user IP
+      itemBody.user = {
+        ...itemBody.user,
+        ip_address: req.ip,
+      };
+    }
+
+    modifiedPieces.push(pieces[i]);
+    modifiedPieces.push(JSON.stringify(itemBody));
+  }
+
+  const modifiedEnvelope = modifiedPieces.join('\n');
+
+  // Forward modified envelope to Sentry...
+});
+```
+
+## Troubleshooting
+
+<Accordion title="Events not appearing in Sentry">
+  **Check:**
+  1. Tunnel endpoint is reachable: `curl -X POST https://yourapp.com/api/sentry-tunnel`
+  2. DSN in SDK config matches allowed DSN in tunnel
+  3. Check server logs for errors
+  4. Verify Sentry's response in tunnel logs
+</Accordion>
+
+<Accordion title="CORS errors with tunnel">
+  **Solution:** Ensure CORS headers are set:
+  
+  ```javascript
+  app.post('/api/sentry-tunnel', (req, res) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'POST');
+    // Handle request...
+  });
+  ```
+</Accordion>
+
+<Accordion title="High server load from tunnel">
+  **Solutions:**
+  1. Implement rate limiting
+  2. Add caching for repeated requests
+  3. Use async processing queue
+  4. Scale your backend horizontally
+</Accordion>
+
+<Accordion title="Tunnel timeout errors">
+  **Solution:** Increase timeout:
+  
+  ```javascript
+  const sentryResponse = await fetch(url, {
+    // ...
+    signal: AbortSignal.timeout(30000), // 30 second timeout
+  });
+  ```
+</Accordion>
+
+## Production-Ready Example
+
+```javascript
+// api/sentry-tunnel.ts
+import rateLimit from 'express-rate-limit';
+
+const ALLOWED_DSNS = process.env.SENTRY_ALLOWED_DSNS?.split(',') || [];
+const TIMEOUT_MS = 10000;
+
+const limiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 50,
+});
+
+export default async function handler(req, res) {
+  // Apply rate limiting
+  await new Promise((resolve, reject) => {
+    limiter(req, res, (result) => {
+      if (result instanceof Error) reject(result);
+      else resolve(result);
+    });
+  });
+
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  try {
+    const envelope = req.body;
+    const pieces = envelope.split('\n');
+    const header = JSON.parse(pieces[0]);
+
+    // Validate DSN
+    if (!ALLOWED_DSNS.includes(header.dsn)) {
+      console.warn('Rejected DSN:', header.dsn);
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    const dsn = new URL(header.dsn);
+    const projectId = dsn.pathname.replace('/', '');
+
+    // Forward to Sentry with timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
+
+    try {
+      const sentryResponse = await fetch(
+        `https://${dsn.host}/api/${projectId}/envelope/`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': req.headers['content-type'] || 'application/x-sentry-envelope',
+          },
+          body: envelope,
+          signal: controller.signal,
+        }
+      );
+
+      clearTimeout(timeoutId);
+
+      const responseText = await sentryResponse.text();
+
+      // Log errors for monitoring
+      if (!sentryResponse.ok) {
+        console.error('Sentry error:', sentryResponse.status, responseText);
+      }
+
+      res.status(sentryResponse.status).send(responseText);
+    } catch (error) {
+      clearTimeout(timeoutId);
+      throw error;
+    }
+  } catch (error) {
+    console.error('Tunnel error:', error);
+
+    if (error.name === 'AbortError') {
+      return res.status(504).json({ error: 'Gateway timeout' });
+    }
+
+    res.status(500).json({ error: 'Internal server error' });
+  }
+}
+```
+
+## Monitoring Your Tunnel
+
+Add observability to your tunnel endpoint:
+
+```javascript
+import * as Sentry from '@sentry/node';
+
+app.post('/api/sentry-tunnel', async (req, res) => {
+  const startTime = Date.now();
+
+  try {
+    // Forward to Sentry...
+
+    const duration = Date.now() - startTime;
+
+    // Log metrics
+    console.log('Tunnel request:', {
+      duration,
+      size: req.body.length,
+      status: sentryResponse.status,
+    });
+
+  } catch (error) {
+    // Report tunnel errors to Sentry (different project)
+    Sentry.captureException(error, {
+      tags: { component: 'sentry-tunnel' },
+    });
+
+    res.status(500).send('Error');
+  }
+});
+```
+
+## Best Practices
+
+<Accordion title="Use environment variables for configuration">
+  ```javascript
+  const ALLOWED_DSNS = process.env.SENTRY_ALLOWED_DSNS?.split(',');
+  const TUNNEL_TIMEOUT = parseInt(process.env.TUNNEL_TIMEOUT || '10000');
+  ```
+</Accordion>
+
+<Accordion title="Implement health checks">
+  ```javascript
+  app.get('/api/sentry-tunnel/health', (req, res) => {
+    res.json({ status: 'ok' });
+  });
+  ```
+</Accordion>
+
+<Accordion title="Log tunnel activity">
+  ```javascript
+  console.log('Tunnel forwarded event:', {
+    timestamp: new Date().toISOString(),
+    project: projectId,
+    size: envelope.length,
+  });
+  ```
+</Accordion>
+
+<Accordion title="Cache Sentry responses">
+  For rate-limited responses, cache to avoid repeated failures:
+  
+  ```javascript
+  const rateLimitCache = new Map();
+  
+  if (sentryResponse.status === 429) {
+    const retryAfter = sentryResponse.headers.get('retry-after');
+    rateLimitCache.set(projectId, Date.now() + (retryAfter * 1000));
+  }
+  ```
+</Accordion>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Custom Transports" href="/guides/advanced/custom-transports">
+    Build custom transport layers
+  </Card>
+  <Card title="OpenTelemetry" href="/guides/advanced/opentelemetry">
+    Integrate with OpenTelemetry
+  </Card>
+</CardGroup>

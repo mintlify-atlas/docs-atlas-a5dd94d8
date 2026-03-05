@@ -1,0 +1,384 @@
+---
+title: 'AI Monitoring Overview'
+description: 'Monitor AI and LLM applications with automatic instrumentation'
+---
+
+Sentry provides automatic instrumentation for popular AI and LLM providers, capturing detailed telemetry about model interactions, token usage, and performance.
+
+## Supported AI Providers
+
+<CardGroup cols={2}>
+  <Card title="OpenAI" icon="brain" href="/integrations/ai/openai">
+    Monitor GPT-4, GPT-3.5, and other OpenAI models
+  </Card>
+  <Card title="Anthropic" icon="message" href="/integrations/ai/anthropic">
+    Track Claude interactions and responses
+  </Card>
+  <Card title="Google GenAI" icon="google" href="/integrations/ai/google-genai">
+    Instrument Gemini and other Google AI models
+  </Card>
+  <Card title="Vercel AI SDK" icon="triangle" href="/integrations/ai/vercel-ai">
+    Monitor ai library function calls
+  </Card>
+</CardGroup>
+
+## AI Frameworks
+
+<CardGroup cols={2}>
+  <Card title="LangChain" icon="link" href="/integrations/ai/langchain">
+    Automatic instrumentation for LangChain applications
+  </Card>
+  <Card title="LangGraph" icon="sitemap" href="/integrations/ai/langgraph">
+    Monitor agent workflows and state graphs
+  </Card>
+</CardGroup>
+
+## What Gets Captured
+
+AI integrations follow OpenTelemetry Semantic Conventions for Generative AI:
+
+### Model Interactions
+
+- **Operation Type**: Chat completion, text generation, embedding
+- **Model Name**: GPT-4, Claude, Gemini, etc.
+- **Provider**: OpenAI, Anthropic, Google
+- **Token Usage**: Prompt tokens, completion tokens, total tokens
+- **Timestamps**: Start time, end time, duration
+
+### Performance Metrics
+
+- **Response Time**: How long each API call takes
+- **Token Efficiency**: Tokens per second
+- **Error Rates**: Failed API calls
+- **Cost Tracking**: Token usage for cost estimation
+
+### Content (Optional)
+
+- **Prompts**: Input messages and system prompts
+- **Responses**: Model completions and responses
+- **Tool Calls**: Function calling and tool usage
+
+Content capture respects your `sendDefaultPii` setting.
+
+## Quick Start
+
+### Node.js
+
+AI integrations are **enabled by default** in Node.js:
+
+```javascript
+import * as Sentry from '@sentry/node';
+
+Sentry.init({
+  dsn: 'your-dsn',
+  // AI integrations are automatically enabled
+});
+```
+
+Just use your AI SDK normally:
+
+```javascript
+import OpenAI from 'openai';
+
+const openai = new OpenAI();
+
+const response = await openai.chat.completions.create({
+  model: 'gpt-4',
+  messages: [{ role: 'user', content: 'Hello!' }],
+});
+// Automatically tracked in Sentry
+```
+
+### Browser & Edge
+
+For client-side AI monitoring, use manual instrumentation:
+
+```javascript
+import * as Sentry from '@sentry/browser';
+import { instrumentOpenAiClient } from '@sentry/browser';
+import OpenAI from 'openai';
+
+Sentry.init({
+  dsn: 'your-dsn',
+});
+
+const openai = instrumentOpenAiClient(new OpenAI({
+  apiKey: 'your-api-key',
+  dangerouslyAllowBrowser: true,
+}));
+
+// Now tracked in Sentry
+const response = await openai.chat.completions.create({
+  model: 'gpt-4',
+  messages: [{ role: 'user', content: 'Hello!' }],
+});
+```
+
+## Privacy & Data Control
+
+### Default Behavior
+
+By default, integrations **do not** capture prompts and responses:
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  sendDefaultPii: false, // Default: inputs/outputs NOT captured
+});
+```
+
+### Capturing Inputs and Outputs
+
+Enable full content capture:
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  sendDefaultPii: true, // Captures prompts and responses
+});
+```
+
+### Granular Control
+
+Control capture per integration:
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  sendDefaultPii: false, // Override default
+  integrations: [
+    Sentry.openAIIntegration({
+      recordInputs: true,   // Capture prompts
+      recordOutputs: false, // Don't capture responses
+    }),
+    Sentry.anthropicAIIntegration({
+      recordInputs: false,  // Don't capture prompts
+      recordOutputs: true,  // Capture responses
+    }),
+  ],
+});
+```
+
+## Viewing AI Data in Sentry
+
+AI operations appear as **spans** in your traces:
+
+```
+Transaction: POST /api/chat
+├─ gen_ai.chat.completions (OpenAI)
+│  ├─ Model: gpt-4
+│  ├─ Tokens: 150 prompt + 300 completion
+│  ├─ Duration: 2.3s
+│  └─ Status: ok
+└─ db.query (PostgreSQL)
+   └─ Duration: 45ms
+```
+
+### Span Attributes
+
+Each AI span includes:
+
+```javascript
+{
+  'gen_ai.operation.name': 'chat',
+  'gen_ai.request.model': 'gpt-4',
+  'gen_ai.system': 'openai',
+  'gen_ai.usage.input_tokens': 150,
+  'gen_ai.usage.output_tokens': 300,
+  'gen_ai.response.finish_reasons': ['stop'],
+  // If recordInputs: true
+  'gen_ai.prompt.0.role': 'user',
+  'gen_ai.prompt.0.content': 'Hello!',
+  // If recordOutputs: true
+  'gen_ai.completion.0.role': 'assistant',
+  'gen_ai.completion.0.content': 'Hi there!',
+}
+```
+
+## Performance Monitoring
+
+### Token Usage Tracking
+
+Monitor token consumption across your application:
+
+```javascript
+Sentry.startSpan(
+  { name: 'Generate Report', op: 'ai.task' },
+  async (span) => {
+    const summary = await openai.chat.completions.create({
+      model: 'gpt-4',
+      messages: [{ role: 'user', content: prompt }],
+    });
+    
+    // Token usage automatically tracked
+    return summary;
+  }
+);
+```
+
+### Cost Estimation
+
+Use token data to estimate costs:
+
+```javascript
+// View in Sentry dashboard:
+// - Total tokens used per endpoint
+// - Average tokens per request
+// - Token usage trends over time
+```
+
+### Latency Analysis
+
+```javascript
+// Identify slow AI operations
+// Compare response times across models
+// Optimize prompts based on performance data
+```
+
+## Error Tracking
+
+AI errors are automatically captured:
+
+```javascript
+try {
+  const response = await openai.chat.completions.create({
+    model: 'gpt-4',
+    messages: [{ role: 'user', content: prompt }],
+  });
+} catch (error) {
+  // Automatically captured with full context:
+  // - Model and parameters
+  // - Prompt (if recordInputs: true)
+  // - Error type (rate limit, API error, etc.)
+}
+```
+
+## Best Practices
+
+<Tip>
+  Start with `sendDefaultPii: false` and enable content capture only where needed.
+</Tip>
+
+### 1. Privacy First
+
+```javascript
+// Don't capture user data by default
+Sentry.init({
+  dsn: 'your-dsn',
+  sendDefaultPii: false,
+  
+  beforeSendSpan(span) {
+    // Remove sensitive prompts
+    if (span.attributes?.['gen_ai.prompt.0.content']) {
+      span.attributes['gen_ai.prompt.0.content'] = '[Filtered]';
+    }
+    return span;
+  },
+});
+```
+
+### 2. Monitor Token Usage
+
+```javascript
+// Track token consumption
+Sentry.startSpan({ name: 'AI Operation' }, async (span) => {
+  const response = await openai.chat.completions.create({...});
+  
+  span.setAttributes({
+    'ai.tokens.total': response.usage.total_tokens,
+    'ai.tokens.cost_estimate': estimateCost(response.usage),
+  });
+});
+```
+
+### 3. Use Sampling for High-Volume Apps
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  tracesSampleRate: 0.1, // Sample 10% of traces
+});
+```
+
+### 4. Add Business Context
+
+```javascript
+Sentry.startSpan(
+  {
+    name: 'Customer Support Response',
+    attributes: {
+      'ai.use_case': 'support',
+      'customer.tier': 'premium',
+    },
+  },
+  async () => {
+    const response = await openai.chat.completions.create({...});
+    return response;
+  }
+);
+```
+
+## Integration Compatibility
+
+### LangChain Auto-Disables Provider Integrations
+
+When using LangChain, the OpenAI, Anthropic, and Google GenAI integrations are automatically disabled to prevent duplicate spans:
+
+```javascript
+import { ChatOpenAI } from '@langchain/openai';
+
+// LangChain integration handles all instrumentation
+const model = new ChatOpenAI();
+await model.invoke('Hello!');
+// Only LangChain spans are created (no duplicate OpenAI spans)
+```
+
+### Manual Provider Usage
+
+If you use providers directly alongside LangChain:
+
+```javascript
+import OpenAI from 'openai';
+import { ChatOpenAI } from '@langchain/openai';
+
+const openai = new OpenAI();
+const langchainModel = new ChatOpenAI();
+
+// Direct OpenAI usage: Creates OpenAI span
+await openai.chat.completions.create({...});
+
+// LangChain usage: Creates LangChain span
+await langchainModel.invoke('Hello!');
+```
+
+## Platform Support
+
+| Integration | Node.js | Browser | Edge Runtime |
+|------------|---------|---------|-------------|
+| OpenAI | Auto | Manual | Manual |
+| Anthropic | Auto | Manual | Manual |
+| Google GenAI | Auto | Manual | Manual |
+| LangChain | Auto | Manual | ❌ |
+| LangGraph | Auto | ❌ | ❌ |
+| Vercel AI | Auto | ❌ | Auto |
+
+**Auto**: Enabled by default with automatic instrumentation
+**Manual**: Requires manual client instrumentation
+**❌**: Not supported
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="OpenAI Integration" icon="openai" href="/integrations/ai/openai">
+    Set up OpenAI monitoring
+  </Card>
+  <Card title="LangChain Integration" icon="link" href="/integrations/ai/langchain">
+    Instrument LangChain apps
+  </Card>
+  <Card title="Performance Best Practices" icon="gauge">
+    Optimize AI application performance
+  </Card>
+  <Card title="Privacy Guidelines" icon="shield">
+    Handle sensitive AI data safely
+  </Card>
+</CardGroup>

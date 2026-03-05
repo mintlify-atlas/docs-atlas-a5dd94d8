@@ -1,0 +1,572 @@
+---
+title: Filtering Events
+description: Control which events are sent to Sentry using hooks and integrations
+---
+
+Filtering allows you to control which events, breadcrumbs, and spans are sent to Sentry, helping reduce noise and protect sensitive data.
+
+## Event Filtering with beforeSend
+
+The `beforeSend` hook processes all error events before they're sent:
+
+```javascript
+import * as Sentry from '@sentry/browser';
+
+Sentry.init({
+  dsn: '__DSN__',
+  beforeSend(event, hint) {
+    // Don't send events with specific error messages
+    if (event.message?.includes('Non-Error exception captured')) {
+      return null; // Returning null drops the event
+    }
+    
+    return event; // Returning the event sends it
+  },
+});
+```
+
+<Warning>
+Returning `null` from `beforeSend` drops the event entirely. Use this carefully to avoid losing important error data.
+</Warning>
+
+### Event Hint
+
+The `hint` parameter contains the original error and additional context:
+
+```javascript
+Sentry.init({
+  dsn: '__DSN__',
+  beforeSend(event, hint) {
+    // Access the original error
+    const error = hint.originalException;
+    
+    if (error instanceof MyCustomError) {
+      // Add custom data
+      event.tags = { ...event.tags, customError: true };
+    }
+    
+    // Access the event's ID
+    console.log('Event ID:', hint.event_id);
+    
+    return event;
+  },
+});
+```
+
+## Transaction Filtering with beforeSendSpan
+
+Filter performance data before sending:
+
+```javascript
+Sentry.init({
+  dsn: '__DSN__',
+  beforeSendSpan(span) {
+    // Filter out health check spans
+    if (span.description?.includes('/health')) {
+      // Note: In v9+, you cannot drop spans by returning null
+      // Instead, use integrations to prevent span creation
+      return span;
+    }
+    
+    // Remove sensitive query parameters
+    if (span.description?.includes('?token=')) {
+      span.description = span.description.split('?')[0];
+    }
+    
+    return span;
+  },
+});
+```
+
+<Warning>
+Starting in SDK v9, you cannot drop spans in `beforeSendSpan` by returning `null`. This hook is for modifying span data only. To control which spans are created, configure integrations instead.
+</Warning>
+
+## Filtering with Integrations
+
+### Inbound Filters Integration
+
+The `inboundFiltersIntegration` (enabled by default) filters common noise:
+
+```javascript
+import { inboundFiltersIntegration } from '@sentry/browser';
+
+Sentry.init({
+  dsn: '__DSN__',
+  integrations: [
+    inboundFiltersIntegration({
+      // Don't send errors from localhost
+      allowUrls: [
+        /^https?:\/\/([^.]+\.)?myapp\.com/,
+      ],
+      
+      // Block errors from specific domains
+      denyUrls: [
+        /graph\.facebook\.com/,
+        /connect\.facebook\.net/,
+      ],
+      
+      // Ignore specific error messages
+      ignoreErrors: [
+        'ResizeObserver loop limit exceeded',
+        'Non-Error promise rejection captured',
+      ],
+      
+      // Ignore errors from specific transactions
+      ignoreTransactions: [
+        '/health',
+        '/metrics',
+      ],
+    }),
+  ],
+});
+```
+
+### Common Ignore Patterns
+
+```javascript
+Sentry.init({
+  dsn: '__DSN__',
+  integrations: [
+    inboundFiltersIntegration({
+      ignoreErrors: [
+        // Browser extensions
+        'top.GLOBALS',
+        'originalCreateNotification',
+        'canvas.contentDocument',
+        'MyApp_RemoveAllHighlights',
+        
+        // Network errors
+        'NetworkError',
+        'Network request failed',
+        
+        // Random plugins/extensions
+        'atomicFindClose',
+        'conduitPage',
+        
+        // Facebook blocked
+        'fb_xd_fragment',
+      ],
+      
+      denyUrls: [
+        // Google Tag Manager
+        /googletagmanager\.com/i,
+        // Browser extensions
+        /extensions\//i,
+        /^chrome:\/\//i,
+        /^moz-extension:\/\//i,
+      ],
+    }),
+  ],
+});
+```
+
+## Breadcrumb Filtering
+
+Filter breadcrumbs before they're added:
+
+```javascript
+Sentry.init({
+  dsn: '__DSN__',
+  beforeBreadcrumb(breadcrumb, hint) {
+    // Don't record console.debug breadcrumbs
+    if (breadcrumb.category === 'console' && breadcrumb.level === 'debug') {
+      return null;
+    }
+    
+    // Filter sensitive data from fetch breadcrumbs
+    if (breadcrumb.category === 'fetch') {
+      const url = breadcrumb.data?.url;
+      if (url?.includes('token=')) {
+        breadcrumb.data.url = url.split('?')[0] + '?[Filtered]';
+      }
+    }
+    
+    return breadcrumb;
+  },
+});
+```
+
+## Filtering Sensitive Data
+
+### Scrubbing Request Data
+
+```javascript
+Sentry.init({
+  dsn: '__DSN__',
+  beforeSend(event) {
+    // Remove sensitive headers
+    if (event.request?.headers) {
+      delete event.request.headers['Authorization'];
+      delete event.request.headers['Cookie'];
+      delete event.request.headers['X-Api-Key'];
+    }
+    
+    // Scrub query parameters
+    if (event.request?.query_string) {
+      const params = new URLSearchParams(event.request.query_string);
+      if (params.has('token')) {
+        params.set('token', '[Filtered]');
+      }
+      if (params.has('api_key')) {
+        params.set('api_key', '[Filtered]');
+      }
+      event.request.query_string = params.toString();
+    }
+    
+    return event;
+  },
+});
+```
+
+### Scrubbing User Data
+
+```javascript
+Sentry.init({
+  dsn: '__DSN__',
+  beforeSend(event) {
+    // Remove email from user data
+    if (event.user?.email) {
+      event.user.email = event.user.email.replace(/(.{2}).*@/, '$1***@');
+    }
+    
+    // Remove IP address
+    if (event.user?.ip_address) {
+      delete event.user.ip_address;
+    }
+    
+    return event;
+  },
+});
+```
+
+<Tip>
+Use `sendDefaultPii: false` to prevent the SDK from sending PII by default. Then explicitly set only the user data you want to send.
+</Tip>
+
+## Filtering by Error Type
+
+```javascript
+Sentry.init({
+  dsn: '__DSN__',
+  beforeSend(event, hint) {
+    const error = hint.originalException;
+    
+    // Ignore specific error types
+    if (error instanceof TypeError && error.message.includes('undefined')) {
+      return null;
+    }
+    
+    // Ignore errors from specific files
+    if (event.exception?.values?.[0]?.stacktrace?.frames) {
+      const frames = event.exception.values[0].stacktrace.frames;
+      if (frames.some(frame => frame.filename?.includes('third-party'))) {
+        return null;
+      }
+    }
+    
+    return event;
+  },
+});
+```
+
+## Filtering by User
+
+```javascript
+Sentry.init({
+  dsn: '__DSN__',
+  beforeSend(event) {
+    // Don't send events from internal users
+    if (event.user?.email?.endsWith('@mycompany.com')) {
+      return null;
+    }
+    
+    // Don't send events from test users
+    if (event.user?.username?.startsWith('test_')) {
+      return null;
+    }
+    
+    return event;
+  },
+});
+```
+
+## Filtering by Environment
+
+```javascript
+Sentry.init({
+  dsn: '__DSN__',
+  environment: process.env.NODE_ENV,
+  beforeSend(event) {
+    // Only send errors in production
+    if (event.environment !== 'production') {
+      return null;
+    }
+    
+    return event;
+  },
+});
+```
+
+<Warning>
+It's usually better to disable Sentry entirely in development rather than filtering in `beforeSend`:
+
+```javascript
+Sentry.init({
+  dsn: '__DSN__',
+  enabled: process.env.NODE_ENV === 'production',
+});
+```
+</Warning>
+
+## Filtering Network Requests
+
+### HTTP Client Integration
+
+Filter outgoing request breadcrumbs:
+
+```javascript
+import { httpClientIntegration } from '@sentry/browser';
+
+Sentry.init({
+  dsn: '__DSN__',
+  integrations: [
+    httpClientIntegration({
+      failedRequestStatusCodes: [[400, 599]], // Only track errors
+      failedRequestTargets: [
+        /api\.myapp\.com/, // Only track API calls
+      ],
+    }),
+  ],
+  beforeBreadcrumb(breadcrumb) {
+    // Filter sensitive URLs
+    if (breadcrumb.category === 'fetch' || breadcrumb.category === 'xhr') {
+      if (breadcrumb.data?.url?.includes('/auth/')) {
+        return null;
+      }
+    }
+    return breadcrumb;
+  },
+});
+```
+
+## Filtering Third-Party Errors
+
+Use the `thirdPartyErrorFilterIntegration` to filter errors from third-party scripts:
+
+```javascript
+import { thirdPartyErrorFilterIntegration } from '@sentry/browser';
+
+Sentry.init({
+  dsn: '__DSN__',
+  integrations: [
+    thirdPartyErrorFilterIntegration({
+      // Filter errors from specific domains
+      filterKeys: ['my-app'],
+      // Optionally specify behavior
+      behaviour: 'drop-error-if-contains-third-party-frames',
+    }),
+  ],
+});
+```
+
+## Advanced Filtering Patterns
+
+### Rate Limiting Specific Errors
+
+```javascript
+const errorCounts = new Map();
+const MAX_SAME_ERROR = 5;
+
+Sentry.init({
+  dsn: '__DSN__',
+  beforeSend(event) {
+    const fingerprint = event.fingerprint?.[0] || event.message || 'unknown';
+    const count = errorCounts.get(fingerprint) || 0;
+    
+    if (count >= MAX_SAME_ERROR) {
+      return null; // Drop after 5 occurrences
+    }
+    
+    errorCounts.set(fingerprint, count + 1);
+    return event;
+  },
+});
+```
+
+### Conditional Filtering Based on Context
+
+```javascript
+Sentry.init({
+  dsn: '__DSN__',
+  beforeSend(event) {
+    // Get current scope data
+    const scope = Sentry.getCurrentScope();
+    const tags = scope.getScopeData().tags;
+    
+    // Filter based on tags
+    if (tags?.feature === 'experimental') {
+      // Add special tag for experimental features
+      event.tags = { ...event.tags, experimental: true };
+    }
+    
+    // Filter based on extra data
+    const extras = scope.getScopeData().extra;
+    if (extras?.skipSentry) {
+      return null;
+    }
+    
+    return event;
+  },
+});
+```
+
+## Best Practices
+
+<Accordion title="Use allowlists instead of denylists">
+  When possible, explicitly allow what you want rather than denying what you don't:
+  
+  ```javascript
+  // ✅ Good: explicit allowlist
+  inboundFiltersIntegration({
+    allowUrls: [/^https?:\/\/myapp\.com/],
+  })
+  
+  // ❌ Bad: endless denylist
+  inboundFiltersIntegration({
+    denyUrls: [/facebook/, /google/, /.../ ],
+  })
+  ```
+</Accordion>
+
+<Accordion title="Filter at the source">
+  It's more efficient to prevent events from being created than to filter them in `beforeSend`:
+  
+  ```javascript
+  // ✅ Good: don't create the span
+  integrations: [
+    httpIntegration({
+      tracing: {
+        shouldCreateSpanForRequest: (url) => {
+          return !url.includes('/health');
+        },
+      },
+    }),
+  ]
+  
+  // ❌ Less efficient: filter after creation
+  beforeSendSpan(span) {
+    if (span.description?.includes('/health')) {
+      // Can't drop in v9+
+    }
+    return span;
+  }
+  ```
+</Accordion>
+
+<Accordion title="Always return or drop">
+  In `beforeSend` and `beforeBreadcrumb`, always explicitly return or drop:
+  
+  ```javascript
+  beforeSend(event) {
+    if (shouldDrop) {
+      return null; // Explicit drop
+    }
+    // Modify event...
+    return event; // Explicit return
+  }
+  ```
+</Accordion>
+
+<Accordion title="Don't filter too aggressively">
+  Overly aggressive filtering can hide important issues. Start conservative and refine based on actual noise.
+</Accordion>
+
+<Accordion title="Log filtered events in development">
+  In development, log what you're filtering to verify your rules:
+  
+  ```javascript
+  beforeSend(event) {
+    if (shouldFilter) {
+      if (process.env.NODE_ENV === 'development') {
+        console.log('Filtered event:', event);
+      }
+      return null;
+    }
+    return event;
+  }
+  ```
+</Accordion>
+
+## Complete Example
+
+```javascript
+import * as Sentry from '@sentry/browser';
+import { 
+  inboundFiltersIntegration,
+  httpClientIntegration,
+  thirdPartyErrorFilterIntegration,
+} from '@sentry/browser';
+
+Sentry.init({
+  dsn: '__DSN__',
+  environment: process.env.NODE_ENV,
+  
+  integrations: [
+    // Filter common noise
+    inboundFiltersIntegration({
+      ignoreErrors: [
+        'ResizeObserver loop',
+        'Non-Error promise rejection',
+      ],
+      ignoreTransactions: ['/health', '/metrics'],
+    }),
+    
+    // Filter third-party errors
+    thirdPartyErrorFilterIntegration({
+      filterKeys: ['my-app'],
+    }),
+    
+    // Filter HTTP requests
+    httpClientIntegration({
+      failedRequestStatusCodes: [[500, 599]],
+    }),
+  ],
+  
+  // Filter events
+  beforeSend(event, hint) {
+    // Remove sensitive data
+    if (event.request?.headers) {
+      delete event.request.headers['Authorization'];
+    }
+    
+    // Don't send from internal users
+    if (event.user?.email?.endsWith('@mycompany.com')) {
+      return null;
+    }
+    
+    return event;
+  },
+  
+  // Filter breadcrumbs
+  beforeBreadcrumb(breadcrumb) {
+    // No console.debug
+    if (breadcrumb.category === 'console' && breadcrumb.level === 'debug') {
+      return null;
+    }
+    
+    return breadcrumb;
+  },
+});
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Error Handling" href="/guides/best-practices/error-handling">
+    Best practices for error handling
+  </Card>
+  <Card title="Performance Monitoring" href="/guides/best-practices/performance">
+    Optimize performance monitoring
+  </Card>
+</CardGroup>

@@ -1,0 +1,437 @@
+---
+title: "Transport Options"
+description: "Configure how events are sent to Sentry"
+---
+
+Transport options control how the SDK sends events to Sentry, including buffering, headers, and custom endpoints.
+
+## BaseTransportOptions
+
+From `packages/core/src/types-hoist/transport.ts`:
+
+```typescript
+export interface BaseTransportOptions extends InternalBaseTransportOptions {
+  url: string;
+  headers?: { [key: string]: string };
+}
+
+export interface InternalBaseTransportOptions {
+  tunnel?: string;
+  bufferSize?: number;
+  recordDroppedEvent: Client['recordDroppedEvent'];
+}
+```
+
+## Options
+
+### url
+
+<ParamField path="url" type="string" required>
+  The Sentry ingestion endpoint URL. Usually generated automatically from the DSN.
+  
+  ```typescript
+  {
+    url: 'https://o0.ingest.sentry.io/api/0/envelope/'
+  }
+  ```
+</ParamField>
+
+### headers
+
+<ParamField path="headers" type="Record<string, string>">
+  Custom HTTP headers to include in requests.
+  
+  ```typescript
+  Sentry.init({
+    dsn: 'your-dsn',
+    transportOptions: {
+      headers: {
+        'X-Custom-Header': 'value',
+        'X-API-Key': process.env.API_KEY
+      }
+    }
+  });
+  ```
+</ParamField>
+
+### bufferSize
+
+<ParamField path="bufferSize" type="number" default="64">
+  Maximum number of requests to buffer before dropping events.
+  
+  From `packages/core/src/transports/base.ts`:
+  ```typescript
+  export const DEFAULT_TRANSPORT_BUFFER_SIZE = 64;
+  ```
+  
+  **Example:**
+  ```typescript
+  Sentry.init({
+    dsn: 'your-dsn',
+    transportOptions: {
+      bufferSize: 30 // Limit concurrent requests
+    }
+  });
+  ```
+</ParamField>
+
+### tunnel
+
+<ParamField path="tunnel" type="string">
+  Proxy endpoint for forwarding events. Useful for bypassing ad-blockers or CORS issues.
+  
+  ```typescript
+  Sentry.init({
+    dsn: 'your-dsn',
+    tunnel: '/api/tunnel'
+  });
+  ```
+</ParamField>
+
+## Buffer Management
+
+The transport uses a promise buffer to manage concurrent requests:
+
+```typescript
+import { makePromiseBuffer } from '@sentry/core';
+
+const buffer = makePromiseBuffer(
+  options.bufferSize || DEFAULT_TRANSPORT_BUFFER_SIZE
+);
+
+// Add request to buffer
+buffer.add(requestTask).then(
+  result => result,
+  error => {
+    if (error === SENTRY_BUFFER_FULL_ERROR) {
+      // Buffer is full, event dropped
+      recordEnvelopeLoss('queue_overflow');
+      return Promise.resolve({});
+    }
+    throw error;
+  }
+);
+```
+
+## Custom Transport
+
+Create a custom transport implementation:
+
+```typescript
+import { 
+  createTransport, 
+  BaseTransportOptions,
+  TransportRequest,
+  TransportMakeRequestResponse 
+} from '@sentry/core';
+
+function makeCustomRequest(
+  request: TransportRequest
+): Promise<TransportMakeRequestResponse> {
+  return fetch(options.url, {
+    method: 'POST',
+    body: request.body,
+    headers: {
+      'Content-Type': 'application/x-sentry-envelope',
+      ...options.headers
+    }
+  }).then(response => ({
+    statusCode: response.status,
+    headers: {
+      'x-sentry-rate-limits': response.headers.get('x-sentry-rate-limits'),
+      'retry-after': response.headers.get('retry-after')
+    }
+  }));
+}
+
+export function makeCustomTransport(
+  options: BaseTransportOptions
+) {
+  return createTransport(options, makeCustomRequest);
+}
+```
+
+## Tunnel Endpoint
+
+Implement a tunnel endpoint to proxy events:
+
+### Server-Side Tunnel
+
+```typescript
+// Express.js example
+import express from 'express';
+import { IncomingMessage } from 'http';
+
+const app = express();
+
+app.post('/api/tunnel', express.raw({ type: '*/*' }), async (req, res) => {
+  const envelope = req.body;
+  const pieces = envelope.toString('utf8').split('\n');
+  const header = JSON.parse(pieces[0]);
+  
+  // Forward to Sentry
+  const projectId = header.dsn?.match(/\/(\d+)$/)?.[1];
+  if (!projectId) {
+    return res.status(400).send('Invalid DSN');
+  }
+  
+  const upstream = `https://o0.ingest.sentry.io/api/${projectId}/envelope/`;
+  
+  try {
+    const response = await fetch(upstream, {
+      method: 'POST',
+      body: envelope,
+      headers: {
+        'Content-Type': 'application/x-sentry-envelope'
+      }
+    });
+    
+    res.status(response.status).send();
+  } catch (error) {
+    res.status(500).send('Tunnel failed');
+  }
+});
+```
+
+### Client Configuration
+
+```typescript
+import * as Sentry from '@sentry/browser';
+
+Sentry.init({
+  dsn: 'your-dsn',
+  tunnel: '/api/tunnel'
+});
+```
+
+## HTTP Client Options
+
+For Node.js, additional HTTP options can be configured:
+
+```typescript
+import * as Sentry from '@sentry/node';
+import { makeNodeTransport } from '@sentry/node';
+import https from 'https';
+
+Sentry.init({
+  dsn: 'your-dsn',
+  transport: makeNodeTransport,
+  transportOptions: {
+    headers: {
+      'User-Agent': 'my-app/1.0.0'
+    },
+    // Custom HTTP agent
+    agent: new https.Agent({
+      keepAlive: true,
+      maxSockets: 10
+    })
+  }
+});
+```
+
+## Offline Support
+
+Implement offline queueing:
+
+```typescript
+import { makeOfflineTransport, makeBrowserOfflineTransport } from '@sentry/core';
+import { makeFetchTransport } from '@sentry/browser';
+
+Sentry.init({
+  dsn: 'your-dsn',
+  transport: makeOfflineTransport(makeFetchTransport)
+});
+```
+
+## Multiplexed Transport
+
+Send different event types to different DSNs:
+
+```typescript
+import { makeMultiplexedTransport } from '@sentry/core';
+import { makeFetchTransport } from '@sentry/browser';
+
+Sentry.init({
+  dsn: 'default-dsn',
+  transport: makeMultiplexedTransport(
+    makeFetchTransport,
+    (args) => {
+      // Route errors to different DSN
+      if (args.getEvent().type === 'error') {
+        return [{ dsn: 'errors-dsn' }];
+      }
+      // Route transactions to different DSN
+      if (args.getEvent().type === 'transaction') {
+        return [{ dsn: 'transactions-dsn' }];
+      }
+      return [];
+    }
+  )
+});
+```
+
+## Rate Limiting
+
+The transport automatically handles rate limiting:
+
+```typescript
+// From packages/core/src/transports/base.ts
+
+// Rate limited items are dropped
+forEachEnvelopeItem(envelope, (item, type) => {
+  const dataCategory = envelopeItemTypeToDataCategory(type);
+  if (isRateLimited(rateLimits, dataCategory)) {
+    options.recordDroppedEvent('ratelimit_backoff', dataCategory);
+  } else {
+    filteredEnvelopeItems.push(item);
+  }
+});
+
+// Update rate limits from response
+rateLimits = updateRateLimits(rateLimits, response);
+```
+
+## Request Retry
+
+Implement custom retry logic:
+
+```typescript
+import { createTransport, BaseTransportOptions } from '@sentry/core';
+
+function makeRequestWithRetry(
+  request: TransportRequest,
+  retries = 3
+): Promise<TransportMakeRequestResponse> {
+  return fetch(options.url, {
+    method: 'POST',
+    body: request.body
+  })
+  .then(response => {
+    if (response.status >= 500 && retries > 0) {
+      // Retry on server errors
+      return new Promise(resolve => {
+        setTimeout(() => {
+          resolve(makeRequestWithRetry(request, retries - 1));
+        }, 1000 * (4 - retries)); // Exponential backoff
+      });
+    }
+    return {
+      statusCode: response.status,
+      headers: {
+        'x-sentry-rate-limits': response.headers.get('x-sentry-rate-limits'),
+        'retry-after': response.headers.get('retry-after')
+      }
+    };
+  });
+}
+```
+
+## Compression
+
+Enable compression for smaller payloads:
+
+```typescript
+import { gzipSync } from 'zlib';
+import { createTransport } from '@sentry/core';
+
+function makeCompressedRequest(
+  request: TransportRequest
+): Promise<TransportMakeRequestResponse> {
+  const compressed = gzipSync(request.body);
+  
+  return fetch(options.url, {
+    method: 'POST',
+    body: compressed,
+    headers: {
+      'Content-Type': 'application/x-sentry-envelope',
+      'Content-Encoding': 'gzip'
+    }
+  });
+}
+```
+
+## Performance Monitoring
+
+Monitor transport performance:
+
+```typescript
+import { createTransport } from '@sentry/core';
+
+function makeMonitoredRequest(
+  request: TransportRequest
+): Promise<TransportMakeRequestResponse> {
+  const startTime = Date.now();
+  
+  return fetch(options.url, {
+    method: 'POST',
+    body: request.body
+  })
+  .then(response => {
+    const duration = Date.now() - startTime;
+    console.log(`Transport request took ${duration}ms`);
+    
+    return {
+      statusCode: response.status
+    };
+  });
+}
+```
+
+## Best Practices
+
+### 1. Set Appropriate Buffer Size
+
+```typescript
+// High-traffic applications
+Sentry.init({
+  transportOptions: {
+    bufferSize: 100 // Increase for burst traffic
+  }
+});
+
+// Low-memory environments
+Sentry.init({
+  transportOptions: {
+    bufferSize: 10 // Decrease to save memory
+  }
+});
+```
+
+### 2. Use Tunnel for Browser Apps
+
+```typescript
+// Avoid CORS and ad-blockers
+Sentry.init({
+  dsn: 'your-dsn',
+  tunnel: '/api/tunnel'
+});
+```
+
+### 3. Add Custom Headers for Authentication
+
+```typescript
+Sentry.init({
+  transportOptions: {
+    headers: {
+      'Authorization': `Bearer ${token}`
+    }
+  }
+});
+```
+
+### 4. Monitor Buffer Overflow
+
+```typescript
+client.on('flush', () => {
+  const buffer = client.getTransport()?.getBuffer();
+  if (buffer?.isFull()) {
+    console.warn('Transport buffer is full');
+  }
+});
+```
+
+## Related
+
+- [Transport](/api/core/transport)
+- [Configuration Options](/api/configuration/options)
+- [Client](/api/core/client)

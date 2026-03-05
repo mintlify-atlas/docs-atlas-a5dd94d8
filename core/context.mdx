@@ -1,0 +1,368 @@
+---
+title: "Context"
+description: "Add structured contextual data to your Sentry events"
+---
+
+Context allows you to attach structured, typed data to your events. Unlike tags (which are searchable strings) and extra data (which is unstructured), contexts provide rich, categorized information about your application state.
+
+## What is Context?
+
+Context data is organized into named categories, each containing structured information relevant to your events:
+
+```javascript
+import * as Sentry from '@sentry/browser';
+
+Sentry.setContext('character', {
+  name: 'Mighty Fighter',
+  level: 19,
+  character_class: 'Warrior',
+  armor: 'plate',
+  health: 450
+});
+```
+
+<Note>
+Context data is automatically included with all subsequent events until it's removed or replaced.
+</Note>
+
+## Setting Context
+
+### Basic Usage
+
+Set context on the isolation scope (applies to all events in the current context):
+
+```javascript
+Sentry.setContext('game_state', {
+  level: 'dungeon_5',
+  difficulty: 'hard',
+  party_size: 4,
+  time_played: 3600
+});
+```
+
+### Multiple Contexts
+
+You can set multiple different contexts:
+
+```javascript
+Sentry.setContext('character', {
+  name: 'Warrior',
+  level: 20
+});
+
+Sentry.setContext('inventory', {
+  gold: 5000,
+  items: 45,
+  capacity: 100
+});
+
+Sentry.setContext('session', {
+  started_at: Date.now(),
+  region: 'us-west'
+});
+```
+
+### Removing Context
+
+Remove context by setting it to `null`:
+
+```javascript
+Sentry.setContext('temporary_data', null);
+```
+
+<Warning>
+Setting a context with the same name will completely replace the previous context. Context data is not merged.
+</Warning>
+
+## Built-in Context Types
+
+Sentry recognizes several standard context types:
+
+### Device Context
+
+```javascript
+Sentry.setContext('device', {
+  name: 'iPhone 14 Pro',
+  family: 'iOS',
+  model: 'iPhone15,2',
+  model_id: 'D73AP',
+  arch: 'arm64',
+  battery_level: 75,
+  orientation: 'portrait',
+  manufacturer: 'Apple',
+  brand: 'Apple',
+  screen_resolution: '1179x2556',
+  screen_density: 3.0,
+  screen_dpi: 460,
+  online: true,
+  charging: false,
+  low_memory: false,
+  simulator: false,
+  memory_size: 6442450944,
+  free_memory: 2147483648,
+  storage_size: 128000000000,
+  free_storage: 45000000000,
+  external_storage_size: 0,
+  external_free_storage: 0,
+  boot_time: '2024-03-01T08:00:00Z'
+});
+```
+
+### Operating System Context
+
+```javascript
+Sentry.setContext('os', {
+  name: 'iOS',
+  version: '17.2',
+  build: '21C62',
+  kernel_version: '23.2.0',
+  rooted: false
+});
+```
+
+### Runtime Context
+
+```javascript
+Sentry.setContext('runtime', {
+  name: 'Node',
+  version: '20.10.0',
+  raw_description: 'Node.js v20.10.0'
+});
+```
+
+### App Context
+
+```javascript
+Sentry.setContext('app', {
+  app_start_time: '2024-03-05T10:00:00Z',
+  device_app_hash: 'abc123',
+  build_type: 'production',
+  app_identifier: 'com.example.app',
+  app_name: 'MyApp',
+  app_version: '2.1.0',
+  app_build: '150'
+});
+```
+
+### Browser Context
+
+```javascript
+Sentry.setContext('browser', {
+  name: 'Chrome',
+  version: '121.0.6167.85',
+  mobile: false,
+  user_agent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)...'
+});
+```
+
+### Culture Context
+
+```javascript
+Sentry.setContext('culture', {
+  locale: 'en-US',
+  timezone: 'America/New_York',
+  calendar: 'Gregorian',
+  display_name: 'English (United States)'
+});
+```
+
+## Custom Context Types
+
+You can create custom context types for your application:
+
+### E-commerce Context
+
+```javascript
+Sentry.setContext('shopping_cart', {
+  items: [
+    { id: 'prod-123', name: 'Widget', quantity: 2, price: 19.99 },
+    { id: 'prod-456', name: 'Gadget', quantity: 1, price: 49.99 }
+  ],
+  subtotal: 89.97,
+  shipping: 5.99,
+  tax: 7.20,
+  total: 103.16,
+  currency: 'USD',
+  coupon_code: 'SAVE10'
+});
+```
+
+### API Request Context
+
+```javascript
+Sentry.setContext('api_request', {
+  endpoint: '/api/v1/users',
+  method: 'POST',
+  status_code: 201,
+  duration_ms: 145,
+  retry_count: 0,
+  rate_limit_remaining: 98,
+  request_id: 'req-abc-123'
+});
+```
+
+### Feature Flag Context
+
+```javascript
+Sentry.setContext('feature_flags', {
+  new_checkout: true,
+  beta_features: false,
+  dark_mode: true,
+  a_b_test_variant: 'B'
+});
+```
+
+<Tip>
+For feature flags, consider using the dedicated [Feature Flags integration](/core/feature-flags) which automatically tracks flag evaluations.
+</Tip>
+
+### Database Context
+
+```javascript
+Sentry.setContext('database', {
+  query: 'SELECT * FROM users WHERE id = ?',
+  duration_ms: 23,
+  rows_affected: 1,
+  connection_pool_size: 10,
+  active_connections: 3
+});
+```
+
+## Context in Scopes
+
+### Isolation Scope Context
+
+Context set via `setContext()` is added to the isolation scope:
+
+```javascript
+import { getIsolationScope } from '@sentry/browser';
+
+const isolationScope = getIsolationScope();
+isolationScope.setContext('request', {
+  id: 'req-123',
+  path: '/checkout'
+});
+```
+
+### Current Scope Context
+
+```javascript
+import { getCurrentScope } from '@sentry/browser';
+
+const currentScope = getCurrentScope();
+currentScope.setContext('operation', {
+  name: 'process_payment',
+  step: 'verification'
+});
+```
+
+### Temporary Context
+
+Use `withScope()` to set context that only applies to specific operations:
+
+```javascript
+Sentry.withScope((scope) => {
+  scope.setContext('payment', {
+    method: 'credit_card',
+    provider: 'stripe',
+    amount: 99.99,
+    currency: 'USD'
+  });
+  
+  Sentry.captureMessage('Payment initiated');
+});
+// Context is automatically removed here
+```
+
+## Context vs Tags vs Extra
+
+### When to Use Context
+
+- Structured, typed data
+- Multiple related fields that belong together
+- Standard categories (device, OS, runtime, etc.)
+- Rich object data
+
+### When to Use Tags
+
+- Simple key-value pairs
+- Data you want to search/filter by
+- High-cardinality identifiers (within limits)
+- Grouping and aggregation
+
+```javascript
+Sentry.setTag('environment', 'production');
+Sentry.setTag('feature', 'checkout');
+```
+
+### When to Use Extra
+
+- Arbitrary, unstructured data
+- Large objects or arrays
+- Debug information
+- Data that doesn't fit other categories
+
+```javascript
+Sentry.setExtra('debug_info', {
+  arbitrary: 'data',
+  nested: { values: [1, 2, 3] }
+});
+```
+
+<Note>
+**Quick Reference:**
+- **Context**: Structured, categorized data (device, OS, custom categories)
+- **Tags**: Searchable key-value pairs (environment, version)
+- **Extra**: Unstructured additional data (debug info, large objects)
+</Note>
+
+## Context Best Practices
+
+1. **Use descriptive names**: Choose clear context category names that indicate the type of data
+2. **Keep it relevant**: Only include context that helps debug issues
+3. **Avoid sensitive data**: Don't include passwords, tokens, or PII
+4. **Be consistent**: Use the same structure for the same context type across your app
+5. **Size matters**: Large contexts can impact performance and event size limits
+
+## Working with Context Data
+
+### Reading Context
+
+```javascript
+import { getCurrentScope } from '@sentry/browser';
+
+const scope = getCurrentScope();
+const scopeData = scope.getScopeData();
+console.log(scopeData.contexts);
+```
+
+### Merging Contexts
+
+```javascript
+Sentry.withScope((scope) => {
+  // Base context from parent scope is already included
+  scope.setContext('additional', {
+    temporary: true
+  });
+  
+  // Both contexts will be sent with this event
+  Sentry.captureMessage('Test');
+});
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Scopes" icon="layer-group" href="/core/scopes">
+    Learn about scope management
+  </Card>
+  <Card title="Breadcrumbs" icon="shoe-prints" href="/core/breadcrumbs">
+    Track user actions with breadcrumbs
+  </Card>
+  <Card title="User Feedback" icon="comment" href="/core/user-feedback">
+    Collect user feedback with context
+  </Card>
+  <Card title="Feature Flags" icon="flag" href="/core/feature-flags">
+    Track feature flag evaluations
+  </Card>
+</CardGroup>

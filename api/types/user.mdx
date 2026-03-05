@@ -1,0 +1,396 @@
+---
+title: "User Types"
+description: "TypeScript interfaces for user identification"
+---
+
+User types define the structure of user information attached to events.
+
+## User Interface
+
+From `packages/core/src/types-hoist/user.ts`:
+
+```typescript
+export interface User {
+  [key: string]: any;
+  id?: string | number;
+  ip_address?: string | null;
+  email?: string;
+  username?: string;
+  geo?: GeoLocation;
+}
+```
+
+## Fields
+
+### id
+
+<ResponseField name="id" type="string | number">
+  Unique identifier for the user. Can be a string or number.
+  
+  ```typescript
+  id: 'user-123'
+  id: 12345
+  ```
+</ResponseField>
+
+### email
+
+<ResponseField name="email" type="string">
+  User's email address.
+  
+  ```typescript
+  email: 'user@example.com'
+  ```
+</ResponseField>
+
+### username
+
+<ResponseField name="username" type="string">
+  User's username or display name.
+  
+  ```typescript
+  username: 'johndoe'
+  ```
+</ResponseField>
+
+### ip_address
+
+<ResponseField name="ip_address" type="string | null">
+  User's IP address. Use `'{{auto}}'` to automatically capture from request.
+  
+  ```typescript
+  ip_address: '192.168.1.1'
+  ip_address: '{{auto}}' // Auto-capture from request
+  ip_address: null // Explicitly don't capture
+  ```
+</ResponseField>
+
+### geo
+
+<ResponseField name="geo" type="GeoLocation">
+  Geographic location information.
+  
+  ```typescript
+  geo: {
+    country_code: 'US',
+    region: 'California',
+    city: 'San Francisco'
+  }
+  ```
+</ResponseField>
+
+### Custom Fields
+
+The User interface allows arbitrary custom fields:
+
+```typescript
+const user: User = {
+  id: 'user-123',
+  email: 'user@example.com',
+  
+  // Custom fields
+  subscription_plan: 'premium',
+  account_age_days: 365,
+  is_beta_tester: true,
+  signup_date: '2024-01-01',
+  preferences: {
+    theme: 'dark',
+    notifications: true
+  }
+};
+```
+
+## GeoLocation Interface
+
+```typescript
+export interface GeoLocation {
+  country_code?: string;
+  region?: string;
+  city?: string;
+}
+```
+
+### Fields
+
+<ResponseField name="country_code" type="string">
+  Two-letter ISO country code.
+  
+  ```typescript
+  country_code: 'US'
+  ```
+</ResponseField>
+
+<ResponseField name="region" type="string">
+  State, province, or region name.
+  
+  ```typescript
+  region: 'California'
+  ```
+</ResponseField>
+
+<ResponseField name="city" type="string">
+  City name.
+  
+  ```typescript
+  city: 'San Francisco'
+  ```
+</ResponseField>
+
+## Setting User Context
+
+### Using Scope
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+Sentry.setUser({
+  id: 'user-123',
+  email: 'user@example.com',
+  username: 'johndoe',
+  ip_address: '{{auto}}'
+});
+```
+
+### With Custom Fields
+
+```typescript
+Sentry.setUser({
+  id: 'user-123',
+  email: 'user@example.com',
+  username: 'johndoe',
+  
+  // Custom fields
+  subscription: 'premium',
+  signup_date: '2024-01-01',
+  is_verified: true
+});
+```
+
+### Clearing User
+
+```typescript
+// Clear user context
+Sentry.setUser(null);
+```
+
+### Per-Event User
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+Sentry.captureException(error, {
+  user: {
+    id: 'user-456',
+    email: 'other@example.com'
+  }
+});
+```
+
+## Privacy Considerations
+
+### Automatic IP Capture
+
+```typescript
+// Capture IP automatically from request
+Sentry.setUser({
+  id: 'user-123',
+  ip_address: '{{auto}}'
+});
+```
+
+### Disable IP Capture
+
+```typescript
+// Explicitly don't capture IP
+Sentry.setUser({
+  id: 'user-123',
+  ip_address: null
+});
+
+// Or configure globally
+Sentry.init({
+  dsn: 'your-dsn',
+  sendDefaultPii: false
+});
+```
+
+### Hashing Emails
+
+```typescript
+import { createHash } from 'crypto';
+
+function hashEmail(email: string): string {
+  return createHash('sha256').update(email).digest('hex');
+}
+
+Sentry.setUser({
+  id: 'user-123',
+  // Use hashed email instead of plain text
+  email_hash: hashEmail('user@example.com')
+});
+```
+
+## Complete Examples
+
+### Basic User
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+Sentry.setUser({
+  id: 'user-123',
+  email: 'user@example.com',
+  username: 'johndoe'
+});
+```
+
+### User with Geo Location
+
+```typescript
+Sentry.setUser({
+  id: 'user-123',
+  email: 'user@example.com',
+  geo: {
+    country_code: 'US',
+    region: 'California',
+    city: 'San Francisco'
+  }
+});
+```
+
+### User with Subscription Info
+
+```typescript
+Sentry.setUser({
+  id: 'user-123',
+  email: 'user@example.com',
+  username: 'johndoe',
+  
+  subscription_plan: 'premium',
+  subscription_status: 'active',
+  mrr: 99.99,
+  signup_date: '2024-01-01',
+  trial_end_date: null
+});
+```
+
+### User in Express Middleware
+
+```typescript
+import * as Sentry from '@sentry/node';
+import type { Request, Response, NextFunction } from 'express';
+
+app.use((req: Request, res: Response, next: NextFunction) => {
+  if (req.user) {
+    Sentry.setUser({
+      id: req.user.id,
+      email: req.user.email,
+      username: req.user.username,
+      role: req.user.role,
+      ip_address: '{{auto}}'
+    });
+  }
+  next();
+});
+```
+
+### User with Authentication Context
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+function setAuthenticatedUser(user: AuthUser, authMethod: string) {
+  Sentry.setUser({
+    id: user.id,
+    email: user.email,
+    username: user.username,
+    
+    // Authentication details
+    auth_method: authMethod,
+    auth_time: new Date().toISOString(),
+    session_id: user.sessionId,
+    
+    // User attributes
+    account_type: user.accountType,
+    permissions: user.permissions.join(','),
+    two_factor_enabled: user.has2FA
+  });
+}
+
+setAuthenticatedUser(currentUser, 'oauth');
+```
+
+## Best Practices
+
+### 1. Always Set User ID
+
+```typescript
+// Minimum: Always include user ID
+Sentry.setUser({
+  id: 'user-123'
+});
+```
+
+### 2. Clear User on Logout
+
+```typescript
+function handleLogout() {
+  // Clear user context
+  Sentry.setUser(null);
+  
+  // Perform logout
+  performLogout();
+}
+```
+
+### 3. Don't Include Sensitive Data
+
+```typescript
+// Bad - includes sensitive data
+Sentry.setUser({
+  id: 'user-123',
+  email: 'user@example.com',
+  password_hash: '...',  // Never include
+  ssn: '123-45-6789',    // Never include
+  credit_card: '...'     // Never include
+});
+
+// Good - only non-sensitive data
+Sentry.setUser({
+  id: 'user-123',
+  email: 'user@example.com',
+  subscription_plan: 'premium'
+});
+```
+
+### 4. Use Consistent ID Format
+
+```typescript
+// Choose one format and stick with it
+Sentry.setUser({ id: 'user-123' });     // String format
+Sentry.setUser({ id: 123 });            // Numeric format
+
+// Don't mix formats
+// Sentry.setUser({ id: 'user-123' });
+// Sentry.setUser({ id: 456 });          // Inconsistent
+```
+
+### 5. Include User Segments
+
+```typescript
+Sentry.setUser({
+  id: 'user-123',
+  email: 'user@example.com',
+  
+  // Useful for filtering and analysis
+  segment: 'enterprise',
+  cohort: '2024-Q1',
+  ab_test_group: 'variant_b'
+});
+```
+
+## Related
+
+- [Scope](/api/core/scope)
+- [Event Types](/api/types/event)
+- [Configuration](/api/configuration/options)

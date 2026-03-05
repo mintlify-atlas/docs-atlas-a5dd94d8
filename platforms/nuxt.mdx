@@ -1,0 +1,480 @@
+---
+title: Nuxt SDK
+description: Error monitoring and performance tracking for Nuxt applications
+---
+
+The Sentry Nuxt SDK provides comprehensive error monitoring and performance tracking for Nuxt 3 applications with support for server-side rendering, static site generation, and the Nuxt module system.
+
+## Installation
+
+<Steps>
+  <Step title="Install Package">
+    <CodeGroup>
+    ```bash npm
+    npm install @sentry/nuxt
+    ```
+
+    ```bash yarn
+    yarn add @sentry/nuxt
+    ```
+
+    ```bash pnpm
+    pnpm add @sentry/nuxt
+    ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Add to Nuxt Config">
+    Add Sentry to your `nuxt.config.ts`:
+
+    ```typescript
+    export default defineNuxtConfig({
+      modules: ['@sentry/nuxt/module'],
+      
+      sentry: {
+        sourceMapsUploadOptions: {
+          org: 'your-org',
+          project: 'your-project',
+          authToken: process.env.SENTRY_AUTH_TOKEN,
+        },
+      },
+    });
+    ```
+  </Step>
+
+  <Step title="Create Config Files">
+    Create `sentry.client.config.ts` and `sentry.server.config.ts` in your project root.
+  </Step>
+</Steps>
+
+## Version Compatibility
+
+- **Nuxt 3.14+**: Recommended
+- **Nuxt 3.7+**: Minimum supported version
+- **Vue 3**: Required
+- Works with both SSR and static generation
+
+## Basic Setup
+
+### Client Configuration
+
+Create `sentry.client.config.ts` in your project root:
+
+```typescript
+import * as Sentry from '@sentry/nuxt';
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  
+  // Performance Monitoring
+  tracesSampleRate: 1.0,
+  
+  // Session Replay
+  replaysSessionSampleRate: 0.1,
+  replaysOnErrorSampleRate: 1.0,
+  
+  integrations: [
+    Sentry.replayIntegration(),
+  ],
+});
+```
+
+### Server Configuration
+
+Create `sentry.server.config.ts` in your project root:
+
+```typescript
+import * as Sentry from '@sentry/nuxt';
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  
+  tracesSampleRate: 1.0,
+  
+  // Server-specific options
+  debug: false,
+});
+```
+
+## Error Handling
+
+### Component Errors
+
+Vue component errors are automatically captured:
+
+```vue
+<script setup lang="ts">
+import * as Sentry from '@sentry/nuxt';
+
+const handleClick = async () => {
+  try {
+    await riskyOperation();
+  } catch (error) {
+    Sentry.captureException(error);
+  }
+};
+</script>
+
+<template>
+  <button @click="handleClick">
+    Click me
+  </button>
+</template>
+```
+
+### Server Routes
+
+```typescript
+// server/api/users.ts
+import * as Sentry from '@sentry/nuxt';
+
+export default defineEventHandler(async (event) => {
+  try {
+    const users = await fetchUsers();
+    return users;
+  } catch (error) {
+    Sentry.captureException(error);
+    throw createError({
+      statusCode: 500,
+      message: 'Failed to fetch users',
+    });
+  }
+});
+```
+
+### API Routes with Spans
+
+```typescript
+// server/api/products/[id].ts
+import * as Sentry from '@sentry/nuxt';
+
+export default defineEventHandler(async (event) => {
+  return await Sentry.startSpan(
+    {
+      name: 'fetch-product',
+      op: 'http.server',
+    },
+    async () => {
+      const id = getRouterParam(event, 'id');
+      const product = await db.product.findUnique({
+        where: { id },
+      });
+      return product;
+    },
+  );
+});
+```
+
+## Composables and Plugins
+
+### Custom Error Handler Plugin
+
+```typescript
+// plugins/sentry.client.ts
+export default defineNuxtPlugin((nuxtApp) => {
+  nuxtApp.hook('vue:error', (error, instance, info) => {
+    // Custom error handling logic
+    console.error('Vue error:', error, info);
+  });
+});
+```
+
+### Composable with Tracking
+
+```typescript
+// composables/useUser.ts
+import * as Sentry from '@sentry/nuxt';
+
+export const useUser = () => {
+  const fetchUser = async (id: string) => {
+    return await Sentry.startSpan(
+      {
+        name: 'fetch-user',
+        op: 'function',
+      },
+      async () => {
+        const data = await $fetch(`/api/users/${id}`);
+        return data;
+      },
+    );
+  };
+  
+  return { fetchUser };
+};
+```
+
+## Server Middleware
+
+```typescript
+// server/middleware/logging.ts
+import * as Sentry from '@sentry/nuxt';
+
+export default defineEventHandler((event) => {
+  // Add request context
+  Sentry.setContext('request', {
+    method: event.method,
+    url: event.path,
+  });
+});
+```
+
+## Performance Monitoring
+
+### Page Navigation
+
+Page navigation is automatically tracked when the Sentry module is configured.
+
+### Custom Spans
+
+```typescript
+import * as Sentry from '@sentry/nuxt';
+
+export async function complexOperation() {
+  return await Sentry.startSpan(
+    {
+      name: 'complex-operation',
+      op: 'function',
+      attributes: {
+        operation: 'data-processing',
+      },
+    },
+    async () => {
+      const result = await processData();
+      return result;
+    },
+  );
+}
+```
+
+### Database Queries
+
+```typescript
+import * as Sentry from '@sentry/nuxt';
+import { db } from '~/server/db';
+
+export async function getUser(id: string) {
+  return await Sentry.startSpan(
+    {
+      name: 'db.query.user',
+      op: 'db.query',
+      attributes: {
+        'db.system': 'postgresql',
+        'db.operation': 'SELECT',
+      },
+    },
+    async () => {
+      return await db.user.findUnique({ where: { id } });
+    },
+  );
+}
+```
+
+## Context and User Information
+
+### Setting User Context
+
+```typescript
+// middleware/auth.global.ts
+import * as Sentry from '@sentry/nuxt';
+
+export default defineNuxtRouteMiddleware(async (to, from) => {
+  const user = await getCurrentUser();
+  
+  if (user) {
+    Sentry.setUser({
+      id: user.id,
+      email: user.email,
+      username: user.username,
+    });
+  } else {
+    Sentry.setUser(null);
+  }
+});
+```
+
+### Adding Context
+
+```typescript
+import * as Sentry from '@sentry/nuxt';
+
+Sentry.setContext('order', {
+  id: 'ORDER-123',
+  total: 99.99,
+  items: 3,
+});
+
+Sentry.setTag('payment_method', 'credit_card');
+Sentry.setTag('region', 'us-west');
+```
+
+## Runtime Config
+
+Use Nuxt runtime config for environment variables:
+
+```typescript
+// nuxt.config.ts
+export default defineNuxtConfig({
+  runtimeConfig: {
+    // Private (server-only)
+    sentryAuthToken: process.env.SENTRY_AUTH_TOKEN,
+    
+    public: {
+      // Public (client + server)
+      sentryDsn: process.env.SENTRY_DSN,
+    },
+  },
+  
+  modules: ['@sentry/nuxt/module'],
+});
+```
+
+Access in your config files:
+
+```typescript
+// sentry.client.config.ts
+import * as Sentry from '@sentry/nuxt';
+
+const config = useRuntimeConfig();
+
+Sentry.init({
+  dsn: config.public.sentryDsn,
+  tracesSampleRate: 1.0,
+});
+```
+
+## Source Maps
+
+Configure source maps upload in `nuxt.config.ts`:
+
+```typescript
+export default defineNuxtConfig({
+  modules: ['@sentry/nuxt/module'],
+  
+  sentry: {
+    sourceMapsUploadOptions: {
+      org: 'your-org',
+      project: 'your-project',
+      authToken: process.env.SENTRY_AUTH_TOKEN,
+    },
+    debug: false,
+  },
+  
+  sourcemap: {
+    client: 'hidden',
+    server: 'hidden',
+  },
+});
+```
+
+## Environment Variables
+
+Create a `.env` file:
+
+```bash
+# Required
+SENTRY_DSN=your-dsn-here
+
+# For source maps
+SENTRY_AUTH_TOKEN=your-auth-token
+
+# Optional
+SENTRY_ENVIRONMENT=production
+SENTRY_RELEASE=1.0.0
+```
+
+## Deployment
+
+<Tabs>
+  <Tab title="Vercel">
+    Add environment variables in Vercel:
+    - `SENTRY_DSN`
+    - `SENTRY_AUTH_TOKEN`
+    - `SENTRY_ENVIRONMENT`
+  </Tab>
+
+  <Tab title="Netlify">
+    Add to `netlify.toml`:
+    ```toml
+    [build.environment]
+      SENTRY_DSN = "your-dsn-here"
+    ```
+  </Tab>
+
+  <Tab title="Cloudflare Pages">
+    Configure environment variables in Cloudflare dashboard.
+  </Tab>
+
+  <Tab title="Self-Hosted">
+    Set environment variables in your hosting environment:
+    ```bash
+    export SENTRY_DSN=your-dsn-here
+    export SENTRY_AUTH_TOKEN=your-token
+    ```
+  </Tab>
+</Tabs>
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Module Configuration" icon="gear">
+    Add Sentry module to nuxt.config.ts for automatic setup.
+  </Card>
+  
+  <Card title="Separate Configs" icon="file-code">
+    Use separate config files for client and server initialization.
+  </Card>
+  
+  <Card title="Runtime Config" icon="key">
+    Use Nuxt runtime config for environment-specific values.
+  </Card>
+  
+  <Card title="Source Maps" icon="map">
+    Always configure source maps upload for production.
+  </Card>
+</CardGroup>
+
+## Troubleshooting
+
+<Accordion title="Module Not Loading">
+  Ensure:
+  
+  1. `@sentry/nuxt/module` is in the modules array
+  2. Config files are in the project root
+  3. DSN is correctly set
+</Accordion>
+
+<Accordion title="Source Maps Not Uploaded">
+  Verify:
+  
+  1. `SENTRY_AUTH_TOKEN` is set
+  2. `sourceMapsUploadOptions` is configured
+  3. Check build output for upload logs
+</Accordion>
+
+<Accordion title="Errors Not Captured">
+  Check:
+  
+  1. Both client and server configs are initialized
+  2. DSN is the same in both configs
+  3. Network requests to Sentry are not blocked
+</Accordion>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Server Routes" icon="server" href="/server-routes">
+    Monitor API endpoints and server functions
+  </Card>
+  
+  <Card title="Composables" icon="puzzle-piece" href="/composables">
+    Track custom composables and utilities
+  </Card>
+  
+  <Card title="Session Replay" icon="video" href="/session-replay">
+    Debug with session recordings
+  </Card>
+  
+  <Card title="Vue Integration" icon="vuejs" href="/vue">
+    Advanced Vue-specific features
+  </Card>
+</CardGroup>

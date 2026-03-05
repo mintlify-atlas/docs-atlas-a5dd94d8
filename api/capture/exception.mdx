@@ -1,0 +1,326 @@
+---
+title: "captureException"
+description: "Capture and send exception events to Sentry"
+---
+
+The `captureException` function captures an exception or error and sends it to Sentry.
+
+## Function Signature
+
+```typescript
+export function captureException(
+  exception: unknown,
+  captureContext?: CaptureContext
+): string
+```
+
+## Parameters
+
+<ParamField path="exception" type="unknown" required>
+  The exception to capture. Can be an Error object, string, or any value.
+</ParamField>
+
+<ParamField path="captureContext" type="CaptureContext">
+  Additional context for the exception. Can be:
+  - A Scope object
+  - A partial ScopeContext object
+  - A callback function receiving the current scope
+</ParamField>
+
+## Returns
+
+<ResponseField name="eventId" type="string">
+  The unique ID of the captured event.
+</ResponseField>
+
+## Basic Usage
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+try {
+  riskyOperation();
+} catch (error) {
+  Sentry.captureException(error);
+}
+```
+
+## With Context
+
+### Using Object Context
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+try {
+  await processPayment(userId, amount);
+} catch (error) {
+  Sentry.captureException(error, {
+    tags: {
+      payment_method: 'credit_card',
+      currency: 'USD'
+    },
+    extra: {
+      userId,
+      amount,
+      timestamp: Date.now()
+    },
+    level: 'error'
+  });
+}
+```
+
+### Using Scope Callback
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+try {
+  await fetchUserData(userId);
+} catch (error) {
+  Sentry.captureException(error, (scope) => {
+    scope.setTag('operation', 'fetch_user');
+    scope.setContext('user', {
+      id: userId,
+      action: 'data_fetch'
+    });
+    scope.setLevel('warning');
+    return scope;
+  });
+}
+```
+
+## Advanced Examples
+
+### With User Context
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+try {
+  authenticateUser(credentials);
+} catch (error) {
+  Sentry.captureException(error, {
+    user: {
+      id: credentials.userId,
+      email: credentials.email,
+      ip_address: '{{auto}}'
+    },
+    tags: {
+      auth_method: 'oauth'
+    }
+  });
+}
+```
+
+### With Fingerprinting
+
+Control how errors are grouped in Sentry:
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+try {
+  connectToDatabase();
+} catch (error) {
+  Sentry.captureException(error, {
+    fingerprint: ['database-connection', process.env.DB_HOST],
+    tags: {
+      database: 'postgresql',
+      host: process.env.DB_HOST
+    }
+  });
+}
+```
+
+### With Attachments
+
+```typescript
+import * as Sentry from '@sentry/node';
+import { Scope } from '@sentry/node';
+
+try {
+  processFile(filePath);
+} catch (error) {
+  Sentry.captureException(error, (scope) => {
+    scope.addAttachment({
+      filename: 'error-log.txt',
+      data: logBuffer,
+      contentType: 'text/plain'
+    });
+    return scope;
+  });
+}
+```
+
+## Implementation Details
+
+From `packages/core/src/client.ts`:
+
+```typescript
+public captureException(
+  exception: unknown,
+  hint?: EventHint,
+  scope?: Scope
+): string {
+  const eventId = uuid4();
+
+  // Ensure we haven't captured this very object before
+  if (checkOrSetAlreadyCaught(exception)) {
+    DEBUG_BUILD && debug.log(ALREADY_SEEN_ERROR);
+    return eventId;
+  }
+
+  const hintWithEventId = {
+    event_id: eventId,
+    ...hint,
+  };
+
+  this._process(
+    () =>
+      this.eventFromException(exception, hintWithEventId)
+        .then(event => this._captureEvent(event, hintWithEventId, scope))
+        .then(res => res),
+    'error',
+  );
+
+  return hintWithEventId.event_id;
+}
+```
+
+## Event Processing
+
+Exceptions go through several processing steps:
+
+1. **Duplicate Check**: Ensures the same error object isn't captured twice
+2. **Event Creation**: Converts the exception into an event
+3. **Scope Application**: Applies scope data (breadcrumbs, tags, context)
+4. **Event Processors**: Runs through event processors
+5. **Sampling**: Applies sample rate
+6. **beforeSend**: Runs the beforeSend callback
+7. **Transport**: Sends to Sentry via transport
+
+## Error Types
+
+### Error Objects
+
+```typescript
+try {
+  throw new Error('Something went wrong');
+} catch (error) {
+  Sentry.captureException(error);
+}
+```
+
+### Custom Errors
+
+```typescript
+class ValidationError extends Error {
+  constructor(message: string, public field: string) {
+    super(message);
+    this.name = 'ValidationError';
+  }
+}
+
+try {
+  throw new ValidationError('Invalid email', 'email');
+} catch (error) {
+  Sentry.captureException(error, {
+    tags: {
+      error_type: 'validation',
+      field: (error as ValidationError).field
+    }
+  });
+}
+```
+
+### Non-Error Values
+
+```typescript
+// String
+Sentry.captureException('Something went wrong');
+
+// Object
+Sentry.captureException({
+  message: 'API Error',
+  statusCode: 500,
+  endpoint: '/api/users'
+});
+
+// Number
+Sentry.captureException(404);
+```
+
+## Best Practices
+
+### 1. Always Include Context
+
+```typescript
+// Bad
+Sentry.captureException(error);
+
+// Good
+Sentry.captureException(error, {
+  tags: { operation: 'checkout' },
+  extra: { orderId, customerId }
+});
+```
+
+### 2. Use Appropriate Severity Levels
+
+```typescript
+try {
+  await optionalFeature();
+} catch (error) {
+  // Non-critical error
+  Sentry.captureException(error, {
+    level: 'warning'
+  });
+}
+```
+
+### 3. Add Breadcrumbs for Context
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+Sentry.addBreadcrumb({
+  category: 'api',
+  message: 'Starting payment process',
+  level: 'info'
+});
+
+try {
+  await processPayment();
+} catch (error) {
+  // Breadcrumb will be included automatically
+  Sentry.captureException(error);
+}
+```
+
+### 4. Handle Async Errors
+
+```typescript
+// Promise rejection
+fetchData()
+  .catch(error => {
+    Sentry.captureException(error);
+  });
+
+// Async/await
+async function handleRequest() {
+  try {
+    await processRequest();
+  } catch (error) {
+    Sentry.captureException(error);
+    throw error; // Re-throw if needed
+  }
+}
+```
+
+## Related
+
+- [captureMessage](/api/capture/message)
+- [captureEvent](/api/capture/event)
+- [Scope](/api/core/scope)
+- [Event Types](/api/types/event)

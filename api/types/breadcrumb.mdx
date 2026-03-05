@@ -1,0 +1,434 @@
+---
+title: "Breadcrumb Types"
+description: "TypeScript interfaces for breadcrumbs"
+---
+
+Breadcrumb types define the structure of breadcrumbs that track user actions and events.
+
+## Breadcrumb Interface
+
+From `packages/core/src/types-hoist/breadcrumb.ts`:
+
+```typescript
+export interface Breadcrumb {
+  type?: string;
+  level?: SeverityLevel;
+  event_id?: string;
+  category?: string;
+  message?: string;
+  data?: { [key: string]: any };
+  timestamp?: number;
+}
+```
+
+## Fields
+
+### type
+
+<ResponseField name="type" type="string">
+  The breadcrumb type. Common types:
+  - `'default'` - Default breadcrumb
+  - `'debug'` - Debug information
+  - `'error'` - Error event
+  - `'navigation'` - Navigation event
+  - `'http'` - HTTP request
+  - `'info'` - Informational
+  - `'query'` - Database query
+  - `'transaction'` - Transaction
+  - `'ui'` - UI event
+  - `'user'` - User action
+  
+  ```typescript
+  type: 'http'
+  ```
+</ResponseField>
+
+### level
+
+<ResponseField name="level" type="SeverityLevel">
+  Severity level: `'fatal'`, `'error'`, `'warning'`, `'info'`, `'debug'`, or `'log'`.
+  
+  Defaults to `'info'`.
+  
+  ```typescript
+  level: 'warning'
+  ```
+</ResponseField>
+
+### category
+
+<ResponseField name="category" type="string">
+  Dotted string indicating origin (e.g., `'ui.click'`, `'http.request'`, `'console.log'`).
+  
+  ```typescript
+  category: 'ui.click'
+  ```
+</ResponseField>
+
+### message
+
+<ResponseField name="message" type="string">
+  Human-readable message describing the breadcrumb.
+  
+  ```typescript
+  message: 'User clicked checkout button'
+  ```
+</ResponseField>
+
+### data
+
+<ResponseField name="data" type="Record<string, any>">
+  Arbitrary data associated with the breadcrumb.
+  
+  ```typescript
+  data: {
+    url: '/api/users',
+    method: 'GET',
+    status_code: 200
+  }
+  ```
+</ResponseField>
+
+### timestamp
+
+<ResponseField name="timestamp" type="number">
+  Unix timestamp (seconds) when the breadcrumb occurred.
+  
+  ```typescript
+  timestamp: 1234567890.123
+  ```
+</ResponseField>
+
+## BreadcrumbHint
+
+```typescript
+export interface BreadcrumbHint {
+  [key: string]: any;
+}
+```
+
+Additional context for breadcrumb processing:
+
+```typescript
+Sentry.addBreadcrumb(
+  breadcrumb,
+  {
+    input: [url, options],
+    response: responseObject,
+    startTimestamp: startTime
+  }
+);
+```
+
+## FetchBreadcrumbData
+
+Data structure for fetch breadcrumbs:
+
+```typescript
+export interface FetchBreadcrumbData {
+  method: string;
+  url: string;
+  status_code?: number;
+  request_body_size?: number;
+  response_body_size?: number;
+}
+```
+
+### Example
+
+```typescript
+const fetchBreadcrumb: Breadcrumb = {
+  type: 'http',
+  category: 'fetch',
+  message: 'GET https://api.example.com/users',
+  level: 'info',
+  data: {
+    method: 'GET',
+    url: 'https://api.example.com/users',
+    status_code: 200,
+    request_body_size: 0,
+    response_body_size: 1024
+  },
+  timestamp: Date.now() / 1000
+};
+```
+
+## FetchBreadcrumbHint
+
+```typescript
+export interface FetchBreadcrumbHint {
+  input: any[];
+  data?: unknown;
+  response?: unknown;
+  startTimestamp: number;
+  endTimestamp?: number;
+}
+```
+
+## XhrBreadcrumbData
+
+Data structure for XMLHttpRequest breadcrumbs:
+
+```typescript
+export interface XhrBreadcrumbData {
+  method?: string;
+  url?: string;
+  status_code?: number;
+  request_body_size?: number;
+  response_body_size?: number;
+}
+```
+
+## XhrBreadcrumbHint
+
+```typescript
+export interface XhrBreadcrumbHint {
+  xhr: unknown;
+  input: unknown;
+  startTimestamp: number;
+  endTimestamp: number;
+}
+```
+
+## Common Breadcrumb Examples
+
+### Navigation Breadcrumb
+
+```typescript
+const navigationBreadcrumb: Breadcrumb = {
+  type: 'navigation',
+  category: 'navigation',
+  message: 'Navigated to /dashboard',
+  level: 'info',
+  data: {
+    from: '/home',
+    to: '/dashboard'
+  },
+  timestamp: Date.now() / 1000
+};
+```
+
+### User Action Breadcrumb
+
+```typescript
+const userBreadcrumb: Breadcrumb = {
+  type: 'user',
+  category: 'ui.click',
+  message: 'User clicked "Add to Cart" button',
+  level: 'info',
+  data: {
+    element: 'button#add-to-cart',
+    product_id: '12345',
+    price: 99.99
+  },
+  timestamp: Date.now() / 1000
+};
+```
+
+### HTTP Request Breadcrumb
+
+```typescript
+const httpBreadcrumb: Breadcrumb = {
+  type: 'http',
+  category: 'fetch',
+  message: 'POST /api/orders',
+  level: 'info',
+  data: {
+    method: 'POST',
+    url: '/api/orders',
+    status_code: 201,
+    request_body_size: 256,
+    response_body_size: 128
+  },
+  timestamp: Date.now() / 1000
+};
+```
+
+### Console Log Breadcrumb
+
+```typescript
+const consoleBreadcrumb: Breadcrumb = {
+  type: 'debug',
+  category: 'console',
+  message: 'Processing payment...',
+  level: 'debug',
+  data: {
+    logger: 'console',
+    level: 'log',
+    arguments: ['Processing payment for order', '12345']
+  },
+  timestamp: Date.now() / 1000
+};
+```
+
+### Database Query Breadcrumb
+
+```typescript
+const dbBreadcrumb: Breadcrumb = {
+  type: 'query',
+  category: 'db.query',
+  message: 'SELECT * FROM users WHERE id = $1',
+  level: 'info',
+  data: {
+    'db.system': 'postgresql',
+    'db.name': 'myapp',
+    'db.statement': 'SELECT * FROM users WHERE id = $1',
+    'db.operation': 'SELECT',
+    duration_ms: 15
+  },
+  timestamp: Date.now() / 1000
+};
+```
+
+### Error Breadcrumb
+
+```typescript
+const errorBreadcrumb: Breadcrumb = {
+  type: 'error',
+  category: 'exception',
+  message: 'TypeError: Cannot read property of undefined',
+  level: 'error',
+  data: {
+    error_name: 'TypeError',
+    error_message: 'Cannot read property of undefined',
+    error_stack: '...'
+  },
+  timestamp: Date.now() / 1000
+};
+```
+
+## Using Breadcrumbs
+
+### Adding Breadcrumbs
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+Sentry.addBreadcrumb({
+  category: 'auth',
+  message: 'User logged in',
+  level: 'info',
+  data: {
+    user_id: '123',
+    method: 'oauth'
+  }
+});
+```
+
+### Filtering Breadcrumbs
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+Sentry.init({
+  dsn: 'your-dsn',
+  beforeBreadcrumb(breadcrumb, hint) {
+    // Filter out console breadcrumbs
+    if (breadcrumb.category === 'console') {
+      return null;
+    }
+    
+    // Scrub sensitive URLs
+    if (breadcrumb.data?.url) {
+      breadcrumb.data.url = breadcrumb.data.url.replace(
+        /token=[^&]+/,
+        'token=REDACTED'
+      );
+    }
+    
+    return breadcrumb;
+  }
+});
+```
+
+### Automatic Breadcrumbs
+
+Many integrations automatically create breadcrumbs:
+
+```typescript
+import * as Sentry from '@sentry/node';
+import { httpIntegration, captureConsoleIntegration } from '@sentry/node';
+
+Sentry.init({
+  dsn: 'your-dsn',
+  integrations: [
+    // Automatically creates HTTP breadcrumbs
+    httpIntegration({ breadcrumbs: true }),
+    
+    // Automatically creates console breadcrumbs
+    captureConsoleIntegration({ levels: ['log', 'info', 'warn', 'error'] })
+  ]
+});
+```
+
+## Best Practices
+
+### 1. Use Descriptive Categories
+
+```typescript
+// Bad
+{ category: 'event' }
+
+// Good
+{ category: 'ui.click' }
+{ category: 'http.request' }
+{ category: 'db.query' }
+```
+
+### 2. Include Relevant Data
+
+```typescript
+Sentry.addBreadcrumb({
+  category: 'api',
+  message: 'Fetching user data',
+  data: {
+    userId: '123',
+    endpoint: '/api/users/123',
+    method: 'GET'
+  }
+});
+```
+
+### 3. Use Appropriate Levels
+
+```typescript
+// Debug information
+{ level: 'debug', message: 'Cache miss' }
+
+// Normal operations
+{ level: 'info', message: 'User logged in' }
+
+// Warnings
+{ level: 'warning', message: 'API retry attempt 3/5' }
+
+// Errors
+{ level: 'error', message: 'Payment declined' }
+```
+
+### 4. Avoid Sensitive Data
+
+```typescript
+// Bad
+Sentry.addBreadcrumb({
+  message: 'User login',
+  data: {
+    username: 'john@example.com',
+    password: 'secret123' // Never log passwords!
+  }
+});
+
+// Good
+Sentry.addBreadcrumb({
+  message: 'User login',
+  data: {
+    username: 'john@example.com',
+    method: 'password'
+  }
+});
+```
+
+## Related
+
+- [addBreadcrumb](/api/capture/breadcrumb)
+- [Event Types](/api/types/event)
+- [Configuration](/api/configuration/options)

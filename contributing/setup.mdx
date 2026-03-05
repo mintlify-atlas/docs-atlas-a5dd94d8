@@ -1,0 +1,137 @@
+---
+title: Development Setup
+description: Get your local development environment ready for contributing to the Sentry JavaScript SDK.
+---
+
+This guide will help you set up your local development environment for contributing to the Sentry JavaScript SDK monorepo.
+
+## Prerequisites
+
+### Volta
+
+We use [Volta](https://volta.sh/) to ensure consistent versions of Node.js, Yarn, and pnpm across all contributors. Volta automatically manages the correct versions based on the `volta` field in `package.json`.
+
+Install Volta:
+
+```bash
+curl https://get.volta.sh | bash
+```
+
+For more installation options, see the [Volta documentation](https://docs.volta.sh/guide/getting-started).
+
+### Enable pnpm Support
+
+Make sure to enable [pnpm support in Volta](https://docs.volta.sh/advanced/pnpm) if you want to run the E2E tests locally:
+
+```bash
+export VOLTA_FEATURE_PNPM=1
+```
+
+Add this to your shell configuration file (`.bashrc`, `.zshrc`, etc.) to make it permanent.
+
+### Python
+
+<Note>
+  Due to package incompatibilities, building native binaries currently requires Python version < 3.12.
+</Note>
+
+## Initial Setup
+
+Once you have the prerequisites installed, clone the repository and install dependencies:
+
+```bash
+# Clone the repository
+git clone https://github.com/getsentry/sentry-javascript.git
+cd sentry-javascript
+
+# Install all dependencies
+yarn
+
+# Perform an initial build
+yarn build
+```
+
+The initial build is important because it:
+- Transpiles TypeScript code to JavaScript
+- Generates type definitions
+- Links packages together in the monorepo
+- Ensures TypeScript can read all linked type definitions
+
+With that, the repo is fully set up and you are ready to run all commands.
+
+## Monorepo Structure
+
+The Sentry JavaScript SDK is a monorepo containing 40+ packages, managed with [Yarn workspaces](https://classic.yarnpkg.com/en/docs/workspaces/) and [Nx](https://nx.dev/).
+
+```
+sentry-javascript/
+├── packages/              # SDK packages (@sentry/*)
+│   ├── core/             # Base SDK implementation
+│   ├── browser/          # Browser SDK
+│   ├── node/             # Node.js SDK
+│   ├── react/            # React integration
+│   └── ...               # 40+ more packages
+├── dev-packages/         # Development and testing packages
+│   ├── browser-integration-tests/
+│   ├── e2e-tests/
+│   ├── node-integration-tests/
+│   └── test-utils/
+├── docs/                 # Documentation and guides
+└── scripts/              # Build and automation scripts
+```
+
+## Workspace Configuration
+
+All workspaces are defined in the root `package.json:workspaces` field:
+
+```json
+"workspaces": [
+  "packages/angular",
+  "packages/browser",
+  "packages/core",
+  "packages/node",
+  "dev-packages/browser-integration-tests",
+  "dev-packages/e2e-tests",
+  // ... and more
+]
+```
+
+## Version Management
+
+Volta pins specific versions in `package.json`:
+
+```json
+"volta": {
+  "node": "20.19.2",
+  "yarn": "1.22.22",
+  "pnpm": "9.15.9"
+}
+```
+
+<Warning>
+  Never change Volta, Yarn, or package manager versions unless explicitly asked or approved by the core team.
+</Warning>
+
+## Verifying Your Setup
+
+After completing the initial setup, verify everything is working:
+
+```bash
+# Check that the build completed successfully
+ls packages/core/build
+
+# Run a simple test
+cd packages/core
+yarn test
+```
+
+If you see the `build/` directory with `cjs/`, `esm/`, and `types/` subdirectories, and tests pass, your environment is ready!
+
+## Next Steps
+
+Now that your environment is set up, you can:
+
+- [Build packages](/contributing/building) for development
+- [Run tests](/contributing/testing) to verify your changes
+- Learn about the [development workflow](/contributing/workflow)
+- Explore the [monorepo architecture](/contributing/architecture/overview)

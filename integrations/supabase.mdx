@@ -1,0 +1,461 @@
+---
+title: 'Supabase Integration'
+description: 'Monitor Supabase database queries and authentication operations'
+---
+
+The Supabase integration automatically instruments Supabase client instances to capture database queries, authentication operations, and errors.
+
+## Installation
+
+<Steps>
+  <Step title="Initialize Sentry">
+    ```javascript
+    import * as Sentry from '@sentry/node';
+
+    Sentry.init({
+      dsn: 'your-dsn',
+    });
+    ```
+  </Step>
+  
+  <Step title="Instrument Your Supabase Client">
+    ```javascript
+    import { createClient } from '@supabase/supabase-js';
+    import * as Sentry from '@sentry/node';
+
+    const supabase = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_ANON_KEY
+    );
+
+    // Add Supabase integration
+    Sentry.addIntegration(
+      Sentry.supabaseIntegration({ supabaseClient: supabase })
+    );
+    ```
+  </Step>
+</Steps>
+
+## Basic Usage
+
+Once instrumented, all Supabase operations are automatically tracked:
+
+### Database Queries
+
+```javascript
+// Automatically tracked
+const { data, error } = await supabase
+  .from('users')
+  .select('*')
+  .eq('id', 123);
+```
+
+### Authentication
+
+```javascript
+// Automatically tracked
+const { data, error } = await supabase.auth.signInWithPassword({
+  email: 'user@example.com',
+  password: 'password',
+});
+```
+
+## What Gets Captured
+
+The integration tracks:
+
+### Database Operations
+
+- **SELECT** queries
+- **INSERT** operations
+- **UPDATE** operations
+- **UPSERT** operations
+- **DELETE** operations
+
+### Authentication Operations
+
+- Sign in (password, OAuth, OTP, SSO)
+- Sign up
+- Sign out
+- Reauthenticate
+- Verify OTP
+- Admin operations (create/update/delete users)
+
+### Captured Metadata
+
+- Operation type
+- Table name
+- Query filters
+- Database schema
+- Request body
+- HTTP status codes
+- Error details
+
+## Database Query Tracking
+
+Database operations create spans with detailed information:
+
+```javascript
+const { data, error } = await supabase
+  .from('posts')
+  .select('id, title, author')
+  .eq('published', true)
+  .gte('created_at', '2024-01-01')
+  .order('created_at', { ascending: false })
+  .limit(10);
+
+// Creates span:
+// "select(id, title, author) eq(published, true) gte(created_at, 2024-01-01) from(posts)"
+```
+
+### Span Attributes
+
+```javascript
+{
+  'db.system': 'postgresql',
+  'db.operation': 'select',
+  'db.table': 'posts',
+  'db.schema': 'public',
+  'db.query': [
+    'select(id, title, author)',
+    'eq(published, true)',
+    'gte(created_at, 2024-01-01)',
+  ],
+  'db.url': 'https://your-project.supabase.co',
+  'db.sdk': 'supabase-js/2.x.x',
+}
+```
+
+## Practical Examples
+
+### CRUD Operations
+
+```javascript
+import * as Sentry from '@sentry/node';
+import { createClient } from '@supabase/supabase-js';
+
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_ANON_KEY
+);
+
+Sentry.addIntegration(
+  Sentry.supabaseIntegration({ supabaseClient: supabase })
+);
+
+// Create
+const { data: newUser, error: createError } = await supabase
+  .from('users')
+  .insert({ name: 'John Doe', email: 'john@example.com' })
+  .select();
+// Span: insert(...) from(users)
+
+// Read
+const { data: users, error: readError } = await supabase
+  .from('users')
+  .select('*')
+  .eq('email', 'john@example.com');
+// Span: select(*) eq(email, john@example.com) from(users)
+
+// Update
+const { data: updated, error: updateError } = await supabase
+  .from('users')
+  .update({ name: 'Jane Doe' })
+  .eq('id', 123);
+// Span: update(...) eq(id, 123) from(users)
+
+// Delete
+const { data: deleted, error: deleteError } = await supabase
+  .from('users')
+  .delete()
+  .eq('id', 123);
+// Span: delete eq(id, 123) from(users)
+```
+
+### Complex Queries
+
+```javascript
+// Join with related data
+const { data, error } = await supabase
+  .from('posts')
+  .select(`
+    id,
+    title,
+    content,
+    author:users(name, email)
+  `)
+  .eq('published', true);
+// Tracked with full query details
+
+// Full-text search
+const { data, error } = await supabase
+  .from('articles')
+  .select('*')
+  .textSearch('content', 'quantum computing');
+// Span includes textSearch filter
+
+// Range queries
+const { data, error } = await supabase
+  .from('events')
+  .select('*')
+  .gte('date', '2024-01-01')
+  .lt('date', '2024-12-31');
+// Span includes range filters
+```
+
+### Authentication Flows
+
+```javascript
+// Email/Password Sign Up
+const { data, error } = await supabase.auth.signUp({
+  email: 'user@example.com',
+  password: 'secure-password',
+});
+// Span: auth signUp
+
+// Email/Password Sign In
+const { data, error } = await supabase.auth.signInWithPassword({
+  email: 'user@example.com',
+  password: 'secure-password',
+});
+// Span: auth signInWithPassword
+
+// OAuth Sign In
+const { data, error } = await supabase.auth.signInWithOAuth({
+  provider: 'google',
+});
+// Span: auth signInWithOAuth
+
+// OTP Sign In
+const { data, error } = await supabase.auth.signInWithOtp({
+  email: 'user@example.com',
+});
+// Span: auth signInWithOtp
+
+// Sign Out
+const { error } = await supabase.auth.signOut();
+// Span: auth signOut
+```
+
+### Admin Operations
+
+```javascript
+// Create user (admin)
+const { data, error } = await supabase.auth.admin.createUser({
+  email: 'newuser@example.com',
+  password: 'password',
+  email_confirm: true,
+});
+// Span: auth (admin) createUser
+
+// Update user (admin)
+const { data, error } = await supabase.auth.admin.updateUserById(
+  'user-uuid',
+  { email: 'newemail@example.com' }
+);
+// Span: auth (admin) updateUserById
+
+// Delete user (admin)
+const { data, error } = await supabase.auth.admin.deleteUser('user-uuid');
+// Span: auth (admin) deleteUser
+```
+
+### RLS (Row Level Security)
+
+```javascript
+// Query with user context (RLS enforced)
+const { data, error } = await supabase
+  .from('private_notes')
+  .select('*');
+// RLS policies automatically enforced
+// Errors captured if RLS denies access
+```
+
+## Error Tracking
+
+Errors are automatically captured with context:
+
+```javascript
+const { data, error } = await supabase
+  .from('users')
+  .select('*')
+  .eq('email', 'invalid@example.com');
+
+if (error) {
+  // Error automatically captured in Sentry with:
+  // - Query details
+  // - Error message
+  // - Status code
+  // - Database context
+}
+```
+
+### Captured Error Context
+
+```javascript
+{
+  error: {
+    message: 'relation "users" does not exist',
+    code: '42P01',
+    details: '...',
+  },
+  context: {
+    supabase: {
+      query: ['select(*)'],
+      body: {},
+    },
+  },
+}
+```
+
+## Breadcrumbs
+
+Database operations are added as breadcrumbs:
+
+```javascript
+{
+  type: 'supabase',
+  category: 'db.select',
+  message: 'select(*) eq(published, true) from(posts)',
+  data: {
+    query: ['select(*)', 'eq(published, true)'],
+  },
+}
+```
+
+## Performance Monitoring
+
+Track database performance:
+
+```javascript
+Transaction: POST /api/posts
+├─ select(*) from(posts)
+│  └─ Duration: 45ms
+├─ insert(...) from(posts)
+│  └─ Duration: 23ms
+└─ Total: 150ms
+```
+
+## Filter Mappings
+
+Supabase query filters are translated to readable method names:
+
+| Supabase Filter | Span Name |
+|----------------|----------|
+| `eq` | `eq(column, value)` |
+| `neq` | `neq(column, value)` |
+| `gt` | `gt(column, value)` |
+| `gte` | `gte(column, value)` |
+| `lt` | `lt(column, value)` |
+| `lte` | `lte(column, value)` |
+| `like` | `like(column, pattern)` |
+| `ilike` | `ilike(column, pattern)` |
+| `in` | `in(column, values)` |
+| `contains` | `contains(column, value)` |
+| `textSearch` | `textSearch(column, query)` |
+
+## Source Code
+
+The Supabase integration is implemented in:
+
+`packages/core/src/integrations/supabase.ts:525`
+
+## Best Practices
+
+<Tip>
+  The integration automatically filters sensitive authentication data.
+</Tip>
+
+### 1. Monitor Query Performance
+
+```javascript
+// Add custom spans for complex operations
+await Sentry.startSpan(
+  { name: 'Fetch User Dashboard', op: 'db.query' },
+  async () => {
+    const { data: user } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', userId)
+      .single();
+    
+    const { data: posts } = await supabase
+      .from('posts')
+      .select('*')
+      .eq('author_id', userId);
+    
+    return { user, posts };
+  }
+);
+```
+
+### 2. Handle Errors Gracefully
+
+```javascript
+const { data, error } = await supabase
+  .from('users')
+  .select('*');
+
+if (error) {
+  Sentry.captureException(error, {
+    contexts: {
+      query: {
+        table: 'users',
+        operation: 'select',
+      },
+    },
+  });
+}
+```
+
+### 3. Use Transactions
+
+```javascript
+try {
+  // Multiple operations in a transaction
+  const { data: user } = await supabase
+    .from('users')
+    .insert({ name: 'John' })
+    .select()
+    .single();
+  
+  const { data: profile } = await supabase
+    .from('profiles')
+    .insert({ user_id: user.id })
+    .select();
+  
+  // Both operations tracked separately
+} catch (error) {
+  Sentry.captureException(error);
+}
+```
+
+## Troubleshooting
+
+### Integration Not Working
+
+Ensure you've added the integration after creating the client:
+
+```javascript
+const supabase = createClient(url, key);
+Sentry.addIntegration(
+  Sentry.supabaseIntegration({ supabaseClient: supabase })
+);
+```
+
+### Queries Not Tracked
+
+Verify tracing is enabled:
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  tracesSampleRate: 1.0,
+});
+```
+
+## Related
+
+- [Postgres Integration](/integrations/postgres)
+- [Database Monitoring](https://docs.sentry.io/product/performance/database/)
+- [Supabase Documentation](https://supabase.com/docs)

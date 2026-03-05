@@ -1,0 +1,466 @@
+---
+title: 'Postgres Integration'
+description: 'Monitor PostgreSQL database queries with automatic instrumentation'
+---
+
+The Postgres integration automatically instruments the `pg` (node-postgres) library to capture database query performance and errors.
+
+## Installation
+
+The integration is **enabled by default** in Node.js:
+
+```javascript
+import * as Sentry from '@sentry/node';
+
+Sentry.init({
+  dsn: 'your-dsn',
+  // postgresIntegration is included by default
+});
+```
+
+## Basic Usage
+
+Just use the `pg` library normally:
+
+```javascript
+import { Client } from 'pg';
+
+const client = new Client({
+  host: 'localhost',
+  port: 5432,
+  database: 'mydb',
+  user: 'user',
+  password: 'password',
+});
+
+await client.connect();
+
+// Automatically tracked
+const result = await client.query('SELECT * FROM users WHERE id = $1', [123]);
+
+await client.end();
+```
+
+## Configuration
+
+### Default Configuration
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  integrations: [
+    Sentry.postgresIntegration({
+      ignoreConnectSpans: false, // Track connection spans
+    }),
+  ],
+});
+```
+
+### Ignore Connection Spans
+
+If you want to track only queries and not connections:
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  integrations: [
+    Sentry.postgresIntegration({
+      ignoreConnectSpans: true, // Don't track connections
+    }),
+  ],
+});
+```
+
+## Integration Options
+
+<ParamField path="ignoreConnectSpans" type="boolean" default="false">
+  Whether to ignore database connection spans
+</ParamField>
+
+## What Gets Captured
+
+The integration captures:
+
+### Query Operations
+
+- SQL query text
+- Query parameters
+- Execution time
+- Row counts
+- Database name
+- Connection details
+
+### Span Attributes
+
+```javascript
+{
+  'db.system': 'postgresql',
+  'db.name': 'mydb',
+  'db.statement': 'SELECT * FROM users WHERE id = $1',
+  'db.operation': 'SELECT',
+  'server.address': 'localhost',
+  'server.port': 5432,
+}
+```
+
+## Supported Operations
+
+### Simple Queries
+
+```javascript
+const result = await client.query('SELECT * FROM users');
+// Span: SELECT
+```
+
+### Parameterized Queries
+
+```javascript
+const result = await client.query(
+  'SELECT * FROM users WHERE email = $1',
+  ['user@example.com']
+);
+// Span: SELECT (parameters captured)
+```
+
+### Prepared Statements
+
+```javascript
+const result = await client.query({
+  name: 'fetch-user',
+  text: 'SELECT * FROM users WHERE id = $1',
+  values: [123],
+});
+// Span: SELECT with statement name
+```
+
+### Transactions
+
+```javascript
+await client.query('BEGIN');
+try {
+  await client.query('INSERT INTO users (name) VALUES ($1)', ['John']);
+  await client.query('INSERT INTO profiles (user_id) VALUES ($1)', [1]);
+  await client.query('COMMIT');
+} catch (error) {
+  await client.query('ROLLBACK');
+  throw error;
+}
+// Each query creates a separate span
+```
+
+## Practical Examples
+
+### Basic CRUD Operations
+
+```javascript
+import * as Sentry from '@sentry/node';
+import { Client } from 'pg';
+
+const client = new Client({
+  connectionString: process.env.DATABASE_URL,
+});
+
+await client.connect();
+
+// Create
+const insertResult = await client.query(
+  'INSERT INTO users (name, email) VALUES ($1, $2) RETURNING *',
+  ['John Doe', 'john@example.com']
+);
+// Span: INSERT
+
+// Read
+const selectResult = await client.query(
+  'SELECT * FROM users WHERE email = $1',
+  ['john@example.com']
+);
+// Span: SELECT
+
+// Update
+const updateResult = await client.query(
+  'UPDATE users SET name = $1 WHERE id = $2',
+  ['Jane Doe', 123]
+);
+// Span: UPDATE
+
+// Delete
+const deleteResult = await client.query(
+  'DELETE FROM users WHERE id = $1',
+  [123]
+);
+// Span: DELETE
+
+await client.end();
+```
+
+### Connection Pool
+
+```javascript
+import { Pool } from 'pg';
+
+const pool = new Pool({
+  host: 'localhost',
+  port: 5432,
+  database: 'mydb',
+  max: 20,
+  idleTimeoutMillis: 30000,
+});
+
+// Automatically tracked
+const result = await pool.query('SELECT NOW()');
+
+await pool.end();
+```
+
+### Complex Queries
+
+```javascript
+// Join query
+const result = await client.query(`
+  SELECT u.id, u.name, p.bio
+  FROM users u
+  LEFT JOIN profiles p ON p.user_id = u.id
+  WHERE u.active = true
+  ORDER BY u.created_at DESC
+  LIMIT 10
+`);
+// Full query text captured
+
+// Aggregation
+const stats = await client.query(`
+  SELECT
+    DATE(created_at) as date,
+    COUNT(*) as count,
+    AVG(price) as avg_price
+  FROM orders
+  WHERE created_at >= $1
+  GROUP BY DATE(created_at)
+  ORDER BY date DESC
+`, [new Date('2024-01-01')]);
+// Query with aggregations tracked
+```
+
+### Async/Await with Error Handling
+
+```javascript
+async function getUser(userId) {
+  return await Sentry.startSpan(
+    { name: 'Get User', op: 'db.query' },
+    async () => {
+      try {
+        const result = await client.query(
+          'SELECT * FROM users WHERE id = $1',
+          [userId]
+        );
+        
+        if (result.rows.length === 0) {
+          throw new Error('User not found');
+        }
+        
+        return result.rows[0];
+      } catch (error) {
+        Sentry.captureException(error, {
+          contexts: {
+            database: {
+              query: 'SELECT user',
+              user_id: userId,
+            },
+          },
+        });
+        throw error;
+      }
+    }
+  );
+}
+```
+
+### Cursor-based Pagination
+
+```javascript
+import { Cursor } from 'pg-cursor';
+
+const cursor = client.query(
+  new Cursor('SELECT * FROM large_table WHERE active = true')
+);
+
+// Read in batches
+const read = (rows, done) => {
+  console.log(rows);
+  if (rows.length === 100) {
+    cursor.read(100, read);
+  } else {
+    cursor.close(done);
+  }
+};
+
+cursor.read(100, read);
+// Each read operation tracked
+```
+
+### Transaction with Savepoints
+
+```javascript
+await client.query('BEGIN');
+
+try {
+  await client.query('INSERT INTO users (name) VALUES ($1)', ['John']);
+  
+  await client.query('SAVEPOINT before_profile');
+  
+  try {
+    await client.query('INSERT INTO profiles (user_id) VALUES ($1)', [1]);
+  } catch (profileError) {
+    await client.query('ROLLBACK TO SAVEPOINT before_profile');
+  }
+  
+  await client.query('COMMIT');
+} catch (error) {
+  await client.query('ROLLBACK');
+  throw error;
+}
+```
+
+## Performance Monitoring
+
+View database performance in Sentry:
+
+```
+Transaction: POST /api/users
+├─ db.query (PostgreSQL)
+│  ├─ SELECT * FROM users
+│  └─ Duration: 45ms
+├─ db.query (PostgreSQL)
+│  ├─ INSERT INTO users
+│  └─ Duration: 23ms
+└─ Total: 150ms
+```
+
+### Metrics Tracked
+
+- **Query Duration**: Time taken for each query
+- **Query Count**: Number of queries per transaction
+- **Slow Queries**: Identify performance bottlenecks
+- **Error Rates**: Track failed queries
+
+## Query Parameterization
+
+<Warning>
+  Query parameters are captured in spans. Be careful with sensitive data.
+</Warning>
+
+### Filtering Sensitive Data
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  
+  beforeSendSpan(span) {
+    // Remove query parameters from database spans
+    if (span.op === 'db.query') {
+      if (span.description?.includes('password')) {
+        span.description = 'SELECT [filtered]';
+      }
+    }
+    return span;
+  },
+});
+```
+
+## Source Code
+
+The Postgres integration is implemented in:
+
+`packages/node/src/integrations/tracing/postgres.ts:24`
+
+## Best Practices
+
+<Tip>
+  Use connection pooling for better performance and resource management.
+</Tip>
+
+### 1. Use Connection Pools
+
+```javascript
+import { Pool } from 'pg';
+
+const pool = new Pool({
+  max: 20,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 2000,
+});
+```
+
+### 2. Handle Errors Properly
+
+```javascript
+try {
+  const result = await client.query('SELECT * FROM users');
+} catch (error) {
+  Sentry.captureException(error);
+  // Handle error
+}
+```
+
+### 3. Use Prepared Statements
+
+```javascript
+// Reusable prepared statement
+const query = {
+  name: 'fetch-user',
+  text: 'SELECT * FROM users WHERE id = $1',
+};
+
+const user1 = await client.query(query, [1]);
+const user2 = await client.query(query, [2]);
+// Same prepared statement reused
+```
+
+### 4. Monitor Connection Pool
+
+```javascript
+pool.on('connect', () => {
+  console.log('New client connected');
+});
+
+pool.on('error', (err) => {
+  Sentry.captureException(err);
+});
+```
+
+## Troubleshooting
+
+### Spans Not Appearing
+
+Ensure tracing is enabled:
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  tracesSampleRate: 1.0,
+});
+```
+
+### Missing Query Text
+
+Query text should be automatically captured. If missing, check:
+
+```javascript
+// Ensure pg version is supported
+// The integration requires pg >= 8.0.0
+```
+
+### Too Many Connection Spans
+
+Disable connection tracking:
+
+```javascript
+Sentry.postgresIntegration({
+  ignoreConnectSpans: true,
+});
+```
+
+## Related
+
+- [Supabase Integration](/integrations/supabase)
+- [MCP Server Integration](/integrations/mcp-server)
+- [Database Monitoring](https://docs.sentry.io/product/performance/database/)

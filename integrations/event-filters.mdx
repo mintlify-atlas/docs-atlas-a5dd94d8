@@ -1,0 +1,248 @@
+---
+title: 'Event Filters Integration'
+description: 'Filter unwanted errors and transactions before they are sent to Sentry'
+---
+
+The Event Filters integration (formerly `inboundFiltersIntegration`) filters out events based on error messages, URLs, and transaction names. It includes a curated list of common browser errors that are typically not actionable.
+
+## Installation
+
+This integration is **enabled by default** in all Sentry SDKs.
+
+```javascript
+import * as Sentry from '@sentry/node';
+
+Sentry.init({
+  dsn: 'your-dsn',
+  // eventFiltersIntegration is included by default
+});
+```
+
+## Configuration
+
+### Ignore Errors by Pattern
+
+Filter out errors matching specific patterns:
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  ignoreErrors: [
+    // String matching
+    'Non-Error promise rejection',
+    
+    // Regex patterns
+    /^NetworkError:/,
+    /timeout of \d+ms exceeded/,
+    
+    // Custom error classes
+    'CustomIgnorableError',
+  ],
+});
+```
+
+### Filter by URL
+
+Control which errors are captured based on the script URL:
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  
+  // Only capture errors from these URLs
+  allowUrls: [
+    /https:\/\/yourdomain\.com/,
+    /https:\/\/cdn\.yourdomain\.com/,
+  ],
+  
+  // Never capture errors from these URLs
+  denyUrls: [
+    /graph\.facebook\.com/,
+    /connect\.facebook\.net/,
+    /extensions\//,  // Browser extensions
+    /^chrome:\/\//,   // Chrome internals
+  ],
+});
+```
+
+### Ignore Transactions
+
+Filter out performance transactions by name:
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  ignoreTransactions: [
+    '/health',
+    '/healthcheck',
+    /\/api\/internal\/.*/,
+  ],
+});
+```
+
+## Integration Options
+
+Configure the integration directly for more control:
+
+```javascript
+import * as Sentry from '@sentry/node';
+
+Sentry.init({
+  dsn: 'your-dsn',
+  integrations: [
+    Sentry.eventFiltersIntegration({
+      ignoreErrors: [/CustomError/],
+      denyUrls: [/external-cdn/],
+      allowUrls: [/yourdomain\.com/],
+      ignoreTransactions: ['/health'],
+      disableErrorDefaults: false, // Set to true to disable default filters
+    }),
+  ],
+});
+```
+
+### Options Reference
+
+<ParamField path="ignoreErrors" type="Array<string | RegExp>">
+  Error messages or patterns to ignore
+</ParamField>
+
+<ParamField path="denyUrls" type="Array<string | RegExp>">
+  URLs to block errors from
+</ParamField>
+
+<ParamField path="allowUrls" type="Array<string | RegExp>">
+  Only capture errors from these URLs (if specified)
+</ParamField>
+
+<ParamField path="ignoreTransactions" type="Array<string | RegExp>">
+  Transaction names to ignore
+</ParamField>
+
+<ParamField path="disableErrorDefaults" type="boolean" default="false">
+  Disable the default list of ignored errors
+</ParamField>
+
+## Default Ignored Errors
+
+The integration includes these patterns by default:
+
+```javascript
+const DEFAULT_IGNORE_ERRORS = [
+  /^Script error\.?$/,
+  /^Javascript error: Script error\.? on line 0$/,
+  /^ResizeObserver loop completed with undelivered notifications.$/,
+  /^Cannot redefine property: googletag$/,
+  /^Can't find variable: gmo$/,
+  /^undefined is not an object \(evaluating 'a\.[A-Z]'\)$/,
+  'can\'t redefine non-configurable property "solana"',
+  "vv().getRestrictions is not a function",
+  "Can't find variable: _AutofillCallbackHandler",
+  /^Non-Error promise rejection captured with value: Object Not Found/,
+  /^Java exception was raised during method invocation$/,
+];
+```
+
+These errors are typically:
+- Browser extension conflicts
+- CORS/cross-origin script errors
+- Third-party script issues
+- Non-actionable browser warnings
+
+## How It Works
+
+The integration processes events in this order:
+
+<Steps>
+  <Step title="Check Error Patterns">
+    Compare error messages against `ignoreErrors` patterns
+  </Step>
+  
+  <Step title="Validate Error Content">
+    Drop events without meaningful error data (no message, type, or stacktrace)
+  </Step>
+  
+  <Step title="Check Deny URLs">
+    Filter errors from scripts matching `denyUrls`
+  </Step>
+  
+  <Step title="Check Allow URLs">
+    If `allowUrls` is set, only keep errors from matching URLs
+  </Step>
+  
+  <Step title="Check Transaction Names">
+    Filter transactions matching `ignoreTransactions` patterns
+  </Step>
+</Steps>
+
+## Source Code
+
+The Event Filters integration is implemented in:
+
+`packages/core/src/integrations/eventFilters.ts:52`
+
+## Common Use Cases
+
+### Ignore Third-Party Errors
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  denyUrls: [
+    /googleapis\.com/,
+    /google-analytics\.com/,
+    /googletagmanager\.com/,
+    /facebook\.net/,
+  ],
+});
+```
+
+### Ignore Health Check Endpoints
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  ignoreTransactions: [
+    '/api/health',
+    '/api/readiness',
+    '/api/liveness',
+    /^\/metrics/,
+  ],
+});
+```
+
+### Custom Error Filtering
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  ignoreErrors: [
+    // Ignore validation errors
+    /ValidationError:/,
+    
+    // Ignore network timeouts
+    'Request timeout',
+    /timeout of \d+ms exceeded/,
+    
+    // Ignore user cancellations
+    'AbortError',
+    'The user aborted a request',
+  ],
+});
+```
+
+## Best Practices
+
+<Warning>
+  Be careful not to filter too aggressively. You might miss important errors.
+</Warning>
+
+- Review filtered errors periodically to ensure you're not missing issues
+- Use specific patterns rather than broad filters
+- Consider using `beforeSend` for complex filtering logic
+- Monitor your error volume to detect over-filtering
+
+## Related
+
+- [Dedupe Integration](/integrations/dedupe) - Remove duplicate events
+- [beforeSend Hook](https://docs.sentry.io/platforms/javascript/configuration/filtering/) - Custom event filtering

@@ -1,0 +1,505 @@
+---
+title: "Spans"
+description: "Create and manage spans for distributed tracing"
+---
+
+Spans represent units of work in your application and are the building blocks of distributed tracing.
+
+## Overview
+
+Spans track:
+- Operation timing (start and end)
+- Operation metadata (name, description)
+- Attributes for filtering and analysis
+- Parent-child relationships
+- Status and outcome
+
+## Creating Spans
+
+### startSpan
+
+Create an active span that automatically becomes the parent of nested spans.
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+const result = Sentry.startSpan(
+  { name: 'Operation', op: 'function' },
+  (span) => {
+    // Span is automatically finished when callback completes
+    return performOperation();
+  }
+);
+```
+
+<ParamField path="options" type="StartSpanOptions" required>
+  Configuration for the span.
+  
+  <ParamField path="name" type="string" required>
+    The span description.
+  </ParamField>
+  
+  <ParamField path="op" type="string">
+    The span operation (e.g., `'http.client'`, `'db.query'`).
+  </ParamField>
+  
+  <ParamField path="attributes" type="SpanAttributes">
+    Additional span attributes.
+  </ParamField>
+  
+  <ParamField path="startTime" type="SpanTimeInput">
+    Custom start time.
+  </ParamField>
+  
+  <ParamField path="scope" type="Scope">
+    Custom scope to use.
+  </ParamField>
+  
+  <ParamField path="parentSpan" type="Span">
+    Explicit parent span.
+  </ParamField>
+  
+  <ParamField path="onlyIfParent" type="boolean">
+    Only create span if there's a parent span.
+  </ParamField>
+</ParamField>
+
+<ParamField path="callback" type="function" required>
+  Function to execute within the span context. Receives the span as argument.
+</ParamField>
+
+**Example:**
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+const data = await Sentry.startSpan(
+  {
+    name: 'fetchUserData',
+    op: 'http.client',
+    attributes: {
+      'http.method': 'GET',
+      'http.url': '/api/users'
+    }
+  },
+  async (span) => {
+    const response = await fetch('/api/users');
+    span.setAttribute('http.status_code', response.status);
+    return response.json();
+  }
+);
+```
+
+### startInactiveSpan
+
+Create an inactive span that doesn't automatically become the active parent.
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+const span = Sentry.startInactiveSpan({
+  name: 'Background Task',
+  op: 'task'
+});
+
+try {
+  await performTask();
+  span.setStatus({ code: 1 }); // OK
+} catch (error) {
+  span.setStatus({ code: 2 }); // ERROR
+  throw error;
+} finally {
+  span.end();
+}
+```
+
+### startSpanManual
+
+Create a span with manual control over when it finishes.
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+const result = Sentry.startSpanManual(
+  { name: 'Long Running Operation', op: 'task' },
+  (span, finish) => {
+    someAsyncOperation().then(() => {
+      finish(); // Manually finish the span
+    });
+    return result;
+  }
+);
+```
+
+## Span Interface
+
+From `packages/core/src/types-hoist/span.ts`:
+
+```typescript
+export interface Span {
+  spanContext(): SpanContextData;
+  end(endTimestamp?: SpanTimeInput): void;
+  setAttribute(key: string, value: SpanAttributeValue | undefined): this;
+  setAttributes(attributes: SpanAttributes): this;
+  setStatus(status: SpanStatus): this;
+  updateName(name: string): this;
+  isRecording(): boolean;
+}
+```
+
+### spanContext()
+
+Get context data for the span.
+
+```typescript
+const context = span.spanContext();
+console.log(context.traceId); // Trace ID
+console.log(context.spanId);  // Span ID
+```
+
+<ResponseField name="traceId" type="string">
+  32-character hex string representing the trace.
+</ResponseField>
+
+<ResponseField name="spanId" type="string">
+  16-character hex string representing the span.
+</ResponseField>
+
+<ResponseField name="traceFlags" type="number">
+  Trace flags (1 = sampled, 0 = not sampled).
+</ResponseField>
+
+### setAttribute()
+
+Set a single attribute on the span.
+
+```typescript
+span.setAttribute('http.method', 'POST');
+span.setAttribute('http.status_code', 200);
+span.setAttribute('db.system', 'postgresql');
+```
+
+### setAttributes()
+
+Set multiple attributes at once.
+
+```typescript
+span.setAttributes({
+  'http.method': 'GET',
+  'http.url': '/api/users',
+  'http.status_code': 200,
+  'user.id': '12345'
+});
+```
+
+### setStatus()
+
+Set the span status.
+
+```typescript
+import { SPAN_STATUS_OK, SPAN_STATUS_ERROR } from '@sentry/core';
+
+// Success
+span.setStatus({ code: SPAN_STATUS_OK });
+
+// Error
+span.setStatus({ 
+  code: SPAN_STATUS_ERROR, 
+  message: 'Connection timeout' 
+});
+```
+
+**Status Codes:**
+
+- `0` - Unset
+- `1` - OK
+- `2` - Error
+
+### updateName()
+
+Update the span name.
+
+```typescript
+span.updateName('GET /api/users/123');
+```
+
+**Note:** Use `Sentry.updateSpanName(span, name)` to ensure the name persists through instrumentation.
+
+### end()
+
+End the span.
+
+```typescript
+// End with current timestamp
+span.end();
+
+// End with custom timestamp
+span.end(Date.now());
+```
+
+### isRecording()
+
+Check if the span is recording.
+
+```typescript
+if (span.isRecording()) {
+  span.setAttribute('debug', 'true');
+}
+```
+
+## Span Attributes
+
+```typescript
+export type SpanAttributeValue =
+  | string
+  | number
+  | boolean
+  | Array<null | undefined | string>
+  | Array<null | undefined | number>
+  | Array<null | undefined | boolean>;
+
+export type SpanAttributes = Partial<{
+  'sentry.origin': string;
+  'sentry.op': string;
+  'sentry.source': TransactionSource;
+  'sentry.sample_rate': number;
+}> & Record<string, SpanAttributeValue | undefined>;
+```
+
+### Semantic Attributes
+
+Use semantic conventions for consistency:
+
+**HTTP Attributes:**
+```typescript
+span.setAttributes({
+  'http.method': 'GET',
+  'http.url': 'https://api.example.com/users',
+  'http.status_code': 200,
+  'http.request.body.size': 1024,
+  'http.response.body.size': 4096
+});
+```
+
+**Database Attributes:**
+```typescript
+span.setAttributes({
+  'db.system': 'postgresql',
+  'db.name': 'myapp',
+  'db.statement': 'SELECT * FROM users WHERE id = $1',
+  'db.operation': 'SELECT'
+});
+```
+
+**Custom Attributes:**
+```typescript
+span.setAttributes({
+  'user.id': '123',
+  'feature.flag': 'new-ui',
+  'cache.hit': true,
+  'retry.count': 3
+});
+```
+
+## Nested Spans
+
+Create parent-child relationships:
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+await Sentry.startSpan(
+  { name: 'Parent Operation', op: 'task' },
+  async (parentSpan) => {
+    // This span is automatically a child of parentSpan
+    await Sentry.startSpan(
+      { name: 'Child Operation 1', op: 'http' },
+      async () => {
+        await fetch('/api/endpoint1');
+      }
+    );
+    
+    await Sentry.startSpan(
+      { name: 'Child Operation 2', op: 'db' },
+      async () => {
+        await db.query('SELECT * FROM users');
+      }
+    );
+  }
+);
+```
+
+## Error Handling
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+await Sentry.startSpan(
+  { name: 'Operation', op: 'task' },
+  async (span) => {
+    try {
+      await riskyOperation();
+      span.setStatus({ code: 1 }); // OK
+    } catch (error) {
+      span.setStatus({ 
+        code: 2, 
+        message: error.message 
+      });
+      // Error is automatically captured
+      throw error;
+    }
+  }
+);
+```
+
+## Async Operations
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+// Sequential operations
+await Sentry.startSpan(
+  { name: 'Process Order', op: 'task' },
+  async () => {
+    await Sentry.startSpan({ name: 'Validate', op: 'validation' }, () => 
+      validateOrder(order)
+    );
+    
+    await Sentry.startSpan({ name: 'Process Payment', op: 'payment' }, () => 
+      processPayment(order)
+    );
+    
+    await Sentry.startSpan({ name: 'Send Confirmation', op: 'email' }, () => 
+      sendEmail(order)
+    );
+  }
+);
+
+// Parallel operations
+await Sentry.startSpan(
+  { name: 'Fetch Data', op: 'task' },
+  async () => {
+    await Promise.all([
+      Sentry.startSpan({ name: 'Fetch Users', op: 'http' }, () => 
+        fetchUsers()
+      ),
+      Sentry.startSpan({ name: 'Fetch Products', op: 'http' }, () => 
+        fetchProducts()
+      ),
+      Sentry.startSpan({ name: 'Fetch Orders', op: 'http' }, () => 
+        fetchOrders()
+      )
+    ]);
+  }
+);
+```
+
+## Getting Active Span
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+Sentry.startSpan({ name: 'Parent', op: 'task' }, () => {
+  const activeSpan = Sentry.getActiveSpan();
+  
+  if (activeSpan) {
+    console.log('Active span:', activeSpan.spanContext().spanId);
+    activeSpan.setAttribute('custom', 'value');
+  }
+  
+  // Nested operation
+  Sentry.startSpan({ name: 'Child', op: 'subtask' }, () => {
+    const childSpan = Sentry.getActiveSpan();
+    // childSpan is now the active span
+  });
+});
+```
+
+## Span JSON
+
+Spans are serialized as:
+
+```typescript
+export interface SpanJSON {
+  data: SpanAttributes;
+  description?: string;
+  op?: string;
+  parent_span_id?: string;
+  span_id: string;
+  start_timestamp: number;
+  status?: string;
+  timestamp?: number;
+  trace_id: string;
+  origin?: SpanOrigin;
+  profile_id?: string;
+  exclusive_time?: number;
+  measurements?: Measurements;
+  is_segment?: boolean;
+  segment_id?: string;
+}
+```
+
+## Best Practices
+
+### 1. Use Descriptive Names
+
+```typescript
+// Bad
+Sentry.startSpan({ name: 'op', op: 'task' }, () => {});
+
+// Good
+Sentry.startSpan({ name: 'Process Payment', op: 'payment' }, () => {});
+```
+
+### 2. Set Appropriate Operations
+
+```typescript
+// HTTP requests
+{ name: 'GET /api/users', op: 'http.client' }
+
+// Database queries  
+{ name: 'SELECT users', op: 'db.query' }
+
+// Function calls
+{ name: 'processOrder', op: 'function' }
+
+// Background tasks
+{ name: 'Send Emails', op: 'task' }
+```
+
+### 3. Add Relevant Attributes
+
+```typescript
+Sentry.startSpan(
+  {
+    name: 'Database Query',
+    op: 'db.query',
+    attributes: {
+      'db.system': 'postgresql',
+      'db.statement': query,
+      'db.name': 'production'
+    }
+  },
+  () => executeQuery()
+);
+```
+
+### 4. Handle Errors Properly
+
+```typescript
+await Sentry.startSpan({ name: 'Operation' }, async (span) => {
+  try {
+    await operation();
+  } catch (error) {
+    span.setStatus({ code: 2, message: error.message });
+    throw error;
+  }
+});
+```
+
+## Related
+
+- [Trace Context](/api/tracing/trace-context)
+- [Propagation](/api/tracing/propagation)
+- [Span Types](/api/types/span)
+- [Configuration](/api/configuration/options)

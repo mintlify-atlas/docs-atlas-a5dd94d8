@@ -1,0 +1,444 @@
+---
+title: Google Cloud Functions SDK
+description: Error monitoring and performance tracking for Google Cloud Functions
+---
+
+The Sentry Google Cloud Functions SDK provides error monitoring and performance tracking for serverless functions running on Google Cloud Platform with automatic function wrapping.
+
+## Installation
+
+<CodeGroup>
+```bash npm
+npm install @sentry/google-cloud-serverless
+```
+
+```bash yarn
+yarn add @sentry/google-cloud-serverless
+```
+
+```bash pnpm
+pnpm add @sentry/google-cloud-serverless
+```
+</CodeGroup>
+
+## Basic Setup
+
+### Initialize Sentry
+
+Initialize Sentry at the top of your function file:
+
+```javascript
+const Sentry = require('@sentry/google-cloud-serverless');
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  tracesSampleRate: 1.0,
+  environment: process.env.NODE_ENV,
+});
+```
+
+## Function Types
+
+### HTTP Functions
+
+Wrap HTTP functions with `wrapHttpFunction`:
+
+```javascript
+const Sentry = require('@sentry/google-cloud-serverless');
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  tracesSampleRate: 1.0,
+});
+
+exports.helloHttp = Sentry.wrapHttpFunction((req, res) => {
+  const name = req.query.name || req.body.name || 'World';
+  
+  res.status(200).send(`Hello ${name}!`);
+});
+```
+
+### Background Functions
+
+Wrap background (event-driven) functions with `wrapEventFunction`:
+
+```javascript
+const Sentry = require('@sentry/google-cloud-serverless');
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  tracesSampleRate: 1.0,
+});
+
+exports.helloEvents = Sentry.wrapEventFunction((data, context, callback) => {
+  console.log('Processing event:', context.eventId);
+  
+  // Process the event
+  callback();
+});
+```
+
+### CloudEvents
+
+Wrap CloudEvent functions with `wrapCloudEventFunction`:
+
+```javascript
+const Sentry = require('@sentry/google-cloud-serverless');
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  tracesSampleRate: 1.0,
+});
+
+exports.helloCloudEvent = Sentry.wrapCloudEventFunction((context, callback) => {
+  console.log('CloudEvent type:', context.type);
+  console.log('CloudEvent subject:', context.subject);
+  
+  callback();
+});
+```
+
+## Error Handling
+
+### HTTP Function Errors
+
+```javascript
+const Sentry = require('@sentry/google-cloud-serverless');
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  tracesSampleRate: 1.0,
+});
+
+exports.processOrder = Sentry.wrapHttpFunction(async (req, res) => {
+  try {
+    const order = req.body;
+    const result = await processOrder(order);
+    
+    res.status(200).json({ success: true, result });
+  } catch (error) {
+    Sentry.captureException(error, {
+      tags: {
+        function: 'processOrder',
+      },
+    });
+    
+    res.status(500).json({
+      error: 'Failed to process order',
+    });
+  }
+});
+```
+
+### Background Function Errors
+
+```javascript
+const Sentry = require('@sentry/google-cloud-serverless');
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  tracesSampleRate: 1.0,
+});
+
+exports.processPubSub = Sentry.wrapEventFunction(async (data, context) => {
+  try {
+    const message = Buffer.from(data.data, 'base64').toString();
+    await processMessage(JSON.parse(message));
+  } catch (error) {
+    Sentry.captureException(error, {
+      contexts: {
+        pubsub: {
+          messageId: context.eventId,
+          timestamp: context.timestamp,
+        },
+      },
+    });
+    throw error; // Re-throw for Cloud Functions retry
+  }
+});
+```
+
+## Performance Monitoring
+
+### Custom Spans
+
+```javascript
+const Sentry = require('@sentry/google-cloud-serverless');
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  tracesSampleRate: 1.0,
+});
+
+exports.fetchUser = Sentry.wrapHttpFunction(async (req, res) => {
+  const userId = req.query.id;
+  
+  const user = await Sentry.startSpan(
+    {
+      name: 'fetch-user-from-firestore',
+      op: 'db.query',
+      attributes: {
+        'db.system': 'firestore',
+        'db.operation': 'get',
+      },
+    },
+    async () => {
+      const doc = await admin.firestore()
+        .collection('users')
+        .doc(userId)
+        .get();
+      
+      return doc.data();
+    },
+  );
+  
+  res.status(200).json(user);
+});
+```
+
+### External API Calls
+
+```javascript
+const Sentry = require('@sentry/google-cloud-serverless');
+const fetch = require('node-fetch');
+
+exports.proxyRequest = Sentry.wrapHttpFunction(async (req, res) => {
+  const data = await Sentry.startSpan(
+    {
+      name: 'external-api-call',
+      op: 'http.client',
+    },
+    async () => {
+      const response = await fetch('https://api.example.com/data');
+      return response.json();
+    },
+  );
+  
+  res.status(200).json(data);
+});
+```
+
+## Context and Tags
+
+### Function Context
+
+```javascript
+const Sentry = require('@sentry/google-cloud-serverless');
+
+exports.myFunction = Sentry.wrapHttpFunction((req, res) => {
+  // Set function context
+  Sentry.setContext('function', {
+    name: process.env.FUNCTION_NAME,
+    region: process.env.FUNCTION_REGION,
+    memory: process.env.FUNCTION_MEMORY_MB,
+  });
+  
+  // Set request context
+  Sentry.setContext('request', {
+    method: req.method,
+    path: req.path,
+    ip: req.ip,
+  });
+  
+  res.status(200).send('OK');
+});
+```
+
+### User Identification
+
+```javascript
+const Sentry = require('@sentry/google-cloud-serverless');
+
+exports.authenticatedFunction = Sentry.wrapHttpFunction((req, res) => {
+  // Extract user from Firebase Auth or custom auth
+  const userId = req.headers['x-user-id'];
+  
+  if (userId) {
+    Sentry.setUser({ id: userId });
+  }
+  
+  res.status(200).send('OK');
+});
+```
+
+## Firebase Integration
+
+### Firestore Triggers
+
+```javascript
+const Sentry = require('@sentry/google-cloud-serverless');
+const functions = require('firebase-functions');
+
+Sentry.init({
+  dsn: functions.config().sentry.dsn,
+  tracesSampleRate: 1.0,
+});
+
+exports.onUserCreate = functions.firestore
+  .document('users/{userId}')
+  .onCreate(Sentry.wrapEventFunction(async (snap, context) => {
+    const userData = snap.data();
+    const userId = context.params.userId;
+    
+    try {
+      await sendWelcomeEmail(userData.email);
+    } catch (error) {
+      Sentry.captureException(error, {
+        tags: { userId },
+      });
+    }
+  }));
+```
+
+### Pub/Sub Triggers
+
+```javascript
+const Sentry = require('@sentry/google-cloud-serverless');
+const functions = require('firebase-functions');
+
+exports.processTopic = functions.pubsub
+  .topic('my-topic')
+  .onPublish(Sentry.wrapEventFunction(async (message, context) => {
+    const data = Buffer.from(message.data, 'base64').toString();
+    
+    Sentry.setContext('pubsub', {
+      messageId: message.messageId,
+      publishTime: message.publishTime,
+    });
+    
+    await processMessage(JSON.parse(data));
+  }));
+```
+
+## Environment Variables
+
+Configure using environment variables:
+
+```bash
+# Set via gcloud CLI
+gcloud functions deploy myFunction \
+  --set-env-vars SENTRY_DSN=your-dsn-here,SENTRY_TRACES_SAMPLE_RATE=1.0
+```
+
+Or in your deployment configuration:
+
+```yaml
+# function.yaml
+env:
+  SENTRY_DSN: your-dsn-here
+  SENTRY_TRACES_SAMPLE_RATE: "1.0"
+  SENTRY_ENVIRONMENT: production
+```
+
+## Cloud Run
+
+For Cloud Run deployments:
+
+```javascript
+const Sentry = require('@sentry/google-cloud-serverless');
+const express = require('express');
+
+Sentry.init({
+  dsn: process.env.SENTRY_DSN,
+  tracesSampleRate: 1.0,
+});
+
+const app = express();
+
+// Sentry request handler must be first
+app.use(Sentry.Handlers.requestHandler());
+app.use(Sentry.Handlers.tracingHandler());
+
+app.get('/', (req, res) => {
+  res.send('Hello from Cloud Run!');
+});
+
+// Error handler must be last
+app.use(Sentry.Handlers.errorHandler());
+
+const port = process.env.PORT || 8080;
+app.listen(port, () => {
+  console.log(`Server listening on port ${port}`);
+});
+```
+
+## Terraform Deployment
+
+Configure with Terraform:
+
+```hcl
+resource "google_cloudfunctions_function" "function" {
+  name        = "my-function"
+  runtime     = "nodejs20"
+  entry_point = "helloHttp"
+
+  environment_variables = {
+    SENTRY_DSN               = var.sentry_dsn
+    SENTRY_TRACES_SAMPLE_RATE = "1.0"
+    SENTRY_ENVIRONMENT       = "production"
+  }
+
+  source_archive_bucket = google_storage_bucket.bucket.name
+  source_archive_object = google_storage_bucket_object.archive.name
+  trigger_http          = true
+}
+```
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Wrap Functions" icon="gift">
+    Always wrap your functions with appropriate Sentry wrapper.
+  </Card>
+  
+  <Card title="Set Context" icon="tag">
+    Add function and event context for better debugging.
+  </Card>
+  
+  <Card title="Handle Retries" icon="rotate">
+    Consider retry logic when reporting errors in event functions.
+  </Card>
+  
+  <Card title="Environment Config" icon="gear">
+    Use environment variables for configuration.
+  </Card>
+</CardGroup>
+
+## Troubleshooting
+
+<Accordion title="Events Not Captured">
+  Ensure:
+  
+  1. Function is wrapped with appropriate wrapper
+  2. SENTRY_DSN is configured
+  3. Function has internet access
+  4. Errors are being thrown or captured
+</Accordion>
+
+<Accordion title="Timeout Issues">
+  Consider:
+  
+  1. Increase function timeout
+  2. Use async error reporting
+  3. Ensure Sentry.flush() is called before exit
+</Accordion>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Firestore" icon="database" href="/firestore">
+    Track Firestore operations
+  </Card>
+  
+  <Card title="Pub/Sub" icon="message" href="/pubsub">
+    Monitor message processing
+  </Card>
+  
+  <Card title="Cloud Run" icon="server" href="/cloud-run">
+    Deploy containerized applications
+  </Card>
+  
+  <Card title="Firebase" icon="fire" href="/firebase">
+    Integrate with Firebase services
+  </Card>
+</CardGroup>

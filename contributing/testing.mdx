@@ -1,0 +1,320 @@
+---
+title: Testing
+description: Run tests to verify your changes work correctly across all SDK packages.
+---
+
+The Sentry JavaScript SDK has comprehensive test coverage including unit tests, integration tests, and E2E tests. This guide explains how to run them all.
+
+<Note>
+  You must run `yarn build` before `yarn test` will work, as tests depend on built type definitions.
+</Note>
+
+## Unit Tests
+
+### Run All Unit Tests
+
+From the repository root:
+
+```bash
+yarn test
+```
+
+This runs unit tests for all packages except integration and E2E test packages:
+
+```json
+"test": "nx run-many -t test --exclude \"@sentry-internal/{browser-integration-tests,e2e-tests,integration-shims,node-integration-tests,node-core-integration-tests,cloudflare-integration-tests}\""
+```
+
+### Run Tests for a Single Package
+
+Navigate to the package directory and run tests:
+
+```bash
+cd packages/core
+yarn test
+```
+
+Or run tests with coverage:
+
+```bash
+cd packages/core
+yarn test:watch  # Watch mode for development
+```
+
+### Run Tests for Changed Packages
+
+To run tests only for packages affected by your changes:
+
+```bash
+yarn test:pr
+```
+
+### Test Configuration
+
+Tests are run with [Vitest](https://vitest.dev/). Each package has a `test` script in its `package.json`:
+
+```json
+"scripts": {
+  "test": "vitest run",
+  "test:watch": "vitest --watch"
+}
+```
+
+## Integration Tests
+
+Integration tests verify SDK behavior in real runtime environments.
+
+### Browser Integration Tests
+
+Test browser-specific functionality using Playwright:
+
+```bash
+cd dev-packages/browser-integration-tests
+yarn test
+```
+
+### Node.js Integration Tests
+
+Test Node.js-specific functionality:
+
+```bash
+cd dev-packages/node-integration-tests
+yarn test
+```
+
+### Cloudflare Integration Tests
+
+Test Cloudflare Workers functionality:
+
+```bash
+cd dev-packages/cloudflare-integration-tests
+yarn test
+```
+
+## E2E Tests
+
+E2E tests verify SDK behavior in real-world framework scenarios using a local npm registry (Verdaccio).
+
+### Prerequisites
+
+1. **Docker** - Required to run the Verdaccio registry container
+2. **Volta with pnpm support** - Enable with `VOLTA_FEATURE_PNPM=1`
+
+### Setup
+
+1. Build packages and create tarballs:
+
+```bash
+yarn build
+yarn build:tarball
+```
+
+<Warning>
+  You must re-run `yarn build:tarball` after any changes to packages for the changes to take effect in E2E tests.
+</Warning>
+
+2. Configure environment (optional):
+
+```bash
+cd dev-packages/e2e-tests
+cp .env.example .env
+# Fill in Sentry project auth info if running tests that send data to Sentry
+```
+
+### Run E2E Tests
+
+Run all E2E tests:
+
+```bash
+yarn test:e2e
+```
+
+Run a specific test application:
+
+```bash
+yarn test:run <app-name>
+# Example: yarn test:run nextjs-app-dir
+```
+
+Run with a specific variant:
+
+```bash
+yarn test:run <app-name> --variant <variant-name>
+# Example: yarn test:run nextjs-pages-dir --variant 15
+```
+
+### How E2E Tests Work
+
+1. A fake npm registry (Verdaccio) is launched in Docker
+2. SDK packages are built, packed, and published to Verdaccio
+3. Test applications install packages from Verdaccio
+4. Tests run against the test applications
+
+This ensures tests use your local changes, not published versions from npm.
+
+### E2E Test Structure
+
+Test applications live in `dev-packages/e2e-tests/test-applications/`:
+
+```
+dev-packages/e2e-tests/
+├── test-applications/
+│   ├── nextjs-app-dir/
+│   │   ├── .npmrc              # Points to Verdaccio
+│   │   ├── package.json        # Uses "latest || *" for @sentry/*
+│   │   └── test-recipe.json    # Build and test commands
+│   ├── react-router-6/
+│   └── ...
+└── README.md
+```
+
+### Important: The .npmrc File
+
+Every E2E test application **must** have an `.npmrc` file:
+
+```
+@sentry:registry=http://127.0.0.1:4873
+@sentry-internal:registry=http://127.0.0.1:4873
+```
+
+<Warning>
+  Without this file, pnpm will install packages from the public npm registry instead of your local Verdaccio instance, causing tests to use published versions instead of your local changes.
+</Warning>
+
+To verify packages are from Verdaccio, check:
+
+```bash
+cat node_modules/@sentry/browser/package.json | grep version
+# Should show: "0.0.0-pr.12345" (Verdaccio)
+# NOT: "8.0.0" (public npm)
+```
+
+## Testing Locally
+
+To test local SDK versions in external test projects, you have several options:
+
+### Option 1: yarn link
+
+Symlink your local package:
+
+```bash
+cd packages/browser
+yarn link
+
+cd /path/to/your/project
+yarn link @sentry/browser
+```
+
+### Option 2: yalc
+
+Use [yalc](https://github.com/wclr/yalc) to install packages as if they were published:
+
+```bash
+# In the SDK repo
+cd packages/browser
+yarn yalc:publish
+
+# In your project
+yalc add @sentry/browser
+```
+
+See [docs/using-yalc.md](https://github.com/getsentry/sentry-javascript/blob/develop/docs/using-yalc.md) for details.
+
+### Option 3: Tarballs
+
+Install from a tarball:
+
+```bash
+# In the SDK repo
+yarn build:tarball
+
+# In your project
+yarn add /path/to/sentry-javascript/packages/browser/sentry-browser-*.tgz
+```
+
+## CI Testing
+
+### Browser Tests
+
+```bash
+yarn test:ci:browser
+```
+
+### Node Tests
+
+```bash
+yarn test:ci:node
+```
+
+### Bun Tests
+
+```bash
+yarn test:ci:bun
+```
+
+## Adding Tests
+
+**Any non-trivial fixes/features should include tests.** You'll find a `test/` folder in each package.
+
+### Unit Tests
+
+Add tests in the package's `test/` directory:
+
+```
+packages/core/
+├── src/
+│   └── hub.ts
+└── test/
+    └── lib/
+        └── hub.test.ts
+```
+
+### Integration Tests
+
+- **Browser changes**: Add tests in `dev-packages/browser-integration-tests`
+- **Node changes**: Add tests in `dev-packages/node-integration-tests`
+- **E2E tests**: Add test apps in `dev-packages/e2e-tests/test-applications`
+
+## Common Issues
+
+### Tests fail after SDK changes
+
+Rebuild packages:
+
+```bash
+yarn build:dev
+yarn test
+```
+
+### E2E tests use wrong package versions
+
+1. Check for `.npmrc` file in test application
+2. Rebuild tarballs: `yarn build && yarn build:tarball`
+3. Delete `node_modules` in test app and re-run
+
+### Docker/Verdaccio issues
+
+- Ensure Docker daemon is running
+- Check port 4873 is not in use: `lsof -i :4873`
+- Stop existing containers: `docker ps && docker stop <container-id>`
+
+### Type errors in tests
+
+Ensure types are built:
+
+```bash
+yarn build:dev
+```
+
+## Debugging Tests
+
+1. **Enable debug mode**: Add `debug: true` to Sentry config
+2. **Check browser console**: Look for SDK initialization errors
+3. **Inspect network requests**: Verify events are sent correctly
+4. **Check installed versions**: Verify package versions in `node_modules`
+
+## Next Steps
+
+- Learn about the [development workflow](/contributing/workflow)
+- Understand the [monorepo architecture](/contributing/architecture/overview)
+- Read about [commit and PR guidelines](/contributing/workflow#commit-guidelines)

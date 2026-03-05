@@ -1,0 +1,527 @@
+---
+title: Migrating from v8 to v10
+description: Upgrade guide for Sentry JavaScript SDK v8/v9 to v10
+---
+
+Version 10 focuses on upgrading OpenTelemetry dependencies to v2 with minimal breaking changes. This is a smaller upgrade compared to v7 to v8.
+
+## Prerequisites
+
+- Review the [v10 changelog](https://github.com/getsentry/sentry-javascript/blob/develop/MIGRATION.md#upgrading-from-9x-to-10x)
+- Compatible with Sentry self-hosted 24.4.2 or higher
+- Test in a non-production environment first
+
+## Version Support Changes
+
+<Warning>
+Version 10 has updated runtime requirements:
+
+**Node.js:**
+- Minimum: **Node 18.0.0**
+- ESM-only SDKs (Astro, Nuxt, SvelteKit): **Node 18.19.1+**
+
+**Browsers:**
+- Chrome 80+
+- Edge 80+
+- Safari 14+, iOS Safari 14.4+
+- Firefox 74+
+- Samsung Internet 13.0+
+
+**TypeScript:**
+- Minimum: **TypeScript 5.0.4**
+
+**Deno:**
+- Minimum: **Deno 2.0.0**
+</Warning>
+
+## Installation
+
+```bash
+npm install @sentry/browser@^10.0.0
+# or
+yarn add @sentry/browser@^10.0.0
+```
+
+## Major Changes from v9
+
+### 1. Removed APIs
+
+#### Hub API Completely Removed
+
+The Hub API was deprecated in v8 and is now fully removed in v9+.
+
+**Before (v8):**
+
+```javascript
+const hub = Sentry.getCurrentHub();
+const client = hub.getClient();
+```
+
+**After (v9+):**
+
+```javascript
+const client = Sentry.getClient();
+```
+
+#### Metrics API Removed
+
+The metrics beta has ended. All metrics APIs have been removed.
+
+```javascript
+// These are removed in v9:
+Sentry.metrics.increment('counter');
+Sentry.metrics.gauge('gauge', 100);
+Sentry.metrics.distribution('distribution', 100);
+Sentry.metrics.set('set', 'value');
+```
+
+#### Debug Integration Removed
+
+**Before (v8):**
+
+```javascript
+import { debugIntegration } from '@sentry/browser';
+
+Sentry.init({
+  integrations: [debugIntegration()],
+});
+```
+
+**After (v9+):**
+
+Use `beforeSend` hook to log events:
+
+```javascript
+Sentry.init({
+  beforeSend(event) {
+    console.log('Sending event:', event);
+    return event;
+  },
+});
+```
+
+### 2. OpenTelemetry v2 (v10)
+
+Version 10 upgrades OpenTelemetry dependencies from v1 to v2.
+
+**Node.js Impact:**
+
+All OpenTelemetry instrumentations have been updated. If you use custom OpenTelemetry instrumentations, you may need to update them:
+
+```javascript
+import * as Sentry from '@sentry/node';
+import { GenericPoolInstrumentation } from '@opentelemetry/instrumentation-generic-pool';
+
+Sentry.init({
+  dsn: '__DSN__',
+  openTelemetryInstrumentations: [
+    new GenericPoolInstrumentation(), // Ensure this is v2 compatible
+  ],
+});
+```
+
+### 3. Behavior Changes
+
+#### beforeSendSpan Changes (v9)
+
+You can no longer drop spans by returning `null` from `beforeSendSpan`.
+
+**Before (v8):**
+
+```javascript
+Sentry.init({
+  beforeSendSpan(span) {
+    if (span.description?.includes('/health')) {
+      return null; // Drop the span
+    }
+    return span;
+  },
+});
+```
+
+**After (v9+):**
+
+```javascript
+Sentry.init({
+  beforeSendSpan(span) {
+    // Can only modify, not drop
+    if (span.description?.includes('token=')) {
+      span.description = span.description.split('?')[0];
+    }
+    return span;
+  },
+  
+  // Use integrations to prevent span creation
+  integrations: [
+    Sentry.httpIntegration({
+      tracing: {
+        shouldCreateSpanForRequest: (url) => {
+          return !url.includes('/health');
+        },
+      },
+    }),
+  ],
+});
+```
+
+#### First Input Delay (FID) Removed (v10)
+
+FID web vital has been removed as it's deprecated by Google.
+
+```javascript
+// v9 and earlier captured FID
+// v10 captures INP (Interaction to Next Paint) instead
+
+Sentry.init({
+  integrations: [Sentry.browserTracingIntegration()],
+  // INP is now automatically captured instead of FID
+});
+```
+
+#### IP Address Collection (v10.4+)
+
+IP address inference now respects `sendDefaultPii`:
+
+**Before (v10.0-10.3):**
+
+```javascript
+Sentry.init({
+  dsn: '__DSN__',
+  // IP addresses were always inferred
+});
+```
+
+**After (v10.4+):**
+
+```javascript
+Sentry.init({
+  dsn: '__DSN__',
+  sendDefaultPii: true, // Now required to infer IP addresses
+});
+```
+
+### 4. AWS Lambda Layer Changes
+
+**Version 10 Layer:**
+```
+arn:aws:lambda:us-east-1:123456789012:layer:SentryNodeServerlessSDKv10:1
+```
+
+**Version 9 Layer (for updates/fixes):**
+```
+arn:aws:lambda:us-east-1:123456789012:layer:SentryNodeServerlessSDKv9:1
+```
+
+## Framework-Specific Changes
+
+### Next.js
+
+#### Source Maps (v9)
+
+Client-side source maps are now automatically deleted after upload:
+
+**Before (v8):**
+
+```javascript
+module.exports = withSentryConfig(nextConfig, {
+  // Source maps left in deployment
+});
+```
+
+**After (v9+):**
+
+```javascript
+module.exports = withSentryConfig(nextConfig, {
+  // Source maps automatically deleted
+  // Opt out if needed:
+  sourcemaps: {
+    deleteSourcemapsAfterUpload: false,
+  },
+});
+```
+
+#### Build ID as Release (v9)
+
+Next.js Build ID is no longer used as the release name:
+
+```javascript
+module.exports = withSentryConfig(nextConfig, {
+  // Explicitly set release name
+  release: {
+    name: process.env.RELEASE_VERSION,
+  },
+});
+```
+
+### SvelteKit (v9)
+
+Remix v1.x is no longer supported. Upgrade to v2+.
+
+### React (v9)
+
+#### Error Boundary Types
+
+Error types are now `unknown` instead of `Error`:
+
+**Before (v8):**
+
+```javascript
+<ErrorBoundary
+  onError={(error: Error) => {
+    console.log(error.message); // Error type
+  }}
+>
+```
+
+**After (v9+):**
+
+```javascript
+<ErrorBoundary
+  onError={(error: unknown) => {
+    if (error instanceof Error) {
+      console.log(error.message);
+    }
+  }}
+>
+```
+
+### Node.js (v9)
+
+#### processThreadBreadcrumbIntegration Renamed
+
+**Before (v8):**
+
+```javascript
+import { processThreadBreadcrumbIntegration } from '@sentry/node';
+
+Sentry.init({
+  integrations: [processThreadBreadcrumbIntegration()],
+});
+```
+
+**After (v9+):**
+
+```javascript
+import { childProcessIntegration } from '@sentry/node';
+
+Sentry.init({
+  integrations: [childProcessIntegration()],
+});
+```
+
+#### Prisma v6 (v9)
+
+Prisma integration now supports v6 by default:
+
+```javascript
+import { prismaIntegration } from '@sentry/node';
+
+Sentry.init({
+  integrations: [prismaIntegration()],
+  // No longer needs previewFeatures = ["tracing"] in schema
+});
+```
+
+**For Prisma v5:**
+
+```javascript
+import { PrismaInstrumentation } from '@prisma/instrumentation';
+import { prismaIntegration } from '@sentry/node';
+
+Sentry.init({
+  integrations: [
+    prismaIntegration({
+      prismaInstrumentation: new PrismaInstrumentation(),
+    }),
+  ],
+});
+```
+
+## Step-by-Step Migration
+
+### From v8 to v9
+
+**1. Update Dependencies:**
+
+```bash
+npm install @sentry/browser@^9.0.0
+```
+
+**2. Remove Hub API Usage:**
+
+```javascript
+// Before
+const hub = Sentry.getCurrentHub();
+const client = hub.getClient();
+
+// After
+const client = Sentry.getClient();
+```
+
+**3. Update beforeSendSpan:**
+
+```javascript
+// Before
+beforeSendSpan(span) {
+  if (shouldDrop) return null;
+  return span;
+}
+
+// After
+beforeSendSpan(span) {
+  // Modify only, use integrations to prevent creation
+  return span;
+}
+```
+
+**4. Remove Metrics:**
+
+Remove all `Sentry.metrics.*` calls.
+
+**5. Test:**
+
+- Error capturing
+- Performance monitoring
+- Custom instrumentation
+
+### From v9 to v10
+
+**1. Update Dependencies:**
+
+```bash
+npm install @sentry/browser@^10.0.0
+```
+
+**2. Update TypeScript (if needed):**
+
+```bash
+npm install typescript@^5.0.4
+```
+
+**3. Update Node.js (if needed):**
+
+Ensure you're running Node 18.0.0 or higher.
+
+**4. Update OpenTelemetry Instrumentations:**
+
+If you use custom instrumentations, update to v2-compatible versions.
+
+**5. Handle IP Address Changes:**
+
+```javascript
+Sentry.init({
+  dsn: '__DSN__',
+  sendDefaultPii: true, // If you need IP addresses
+});
+```
+
+**6. Test:**
+
+- All functionality still works
+- OpenTelemetry instrumentations work
+- Web vitals are captured (INP instead of FID)
+
+## Migration Checklist
+
+### v8 to v9
+
+- [ ] Update all `@sentry/*` packages to v9
+- [ ] Remove all Hub API usage
+- [ ] Remove metrics API calls
+- [ ] Update `beforeSendSpan` logic
+- [ ] Update React error boundary types
+- [ ] Rename `processThreadBreadcrumbIntegration` to `childProcessIntegration`
+- [ ] Test error capturing
+- [ ] Test performance monitoring
+
+### v9 to v10
+
+- [ ] Verify Node.js version ≥ 18.0.0
+- [ ] Verify TypeScript version ≥ 5.0.4
+- [ ] Update all `@sentry/*` packages to v10
+- [ ] Update OpenTelemetry instrumentations to v2
+- [ ] Set `sendDefaultPii` if you need IP addresses
+- [ ] Update AWS Lambda layer ARN (if using)
+- [ ] Test OpenTelemetry instrumentations
+- [ ] Verify web vitals capture (INP vs FID)
+
+## Common Issues
+
+<Accordion title="Type errors after upgrading">
+  **Issue:** TypeScript errors about incompatible types
+  
+  **Solution:** Upgrade TypeScript to 5.0.4 or higher:
+  
+  ```bash
+  npm install typescript@^5.0.4
+  ```
+</Accordion>
+
+<Accordion title="OpenTelemetry instrumentation not working">
+  **Issue:** Custom OpenTelemetry instrumentations stopped working in v10
+  
+  **Solution:** Update instrumentations to v2-compatible versions:
+  
+  ```bash
+  npm install @opentelemetry/instrumentation-http@latest
+  ```
+</Accordion>
+
+<Accordion title="Missing IP addresses in events">
+  **Issue:** User IP addresses no longer captured (v10.4+)
+  
+  **Solution:** Enable `sendDefaultPii`:
+  
+  ```javascript
+  Sentry.init({
+    sendDefaultPii: true,
+  });
+  ```
+</Accordion>
+
+<Accordion title="Hub API errors">
+  **Issue:** `getCurrentHub is not a function`
+  
+  **Solution:** Replace with new API:
+  
+  ```javascript
+  // Before
+  const hub = Sentry.getCurrentHub();
+  
+  // After
+  const client = Sentry.getClient();
+  const scope = Sentry.getCurrentScope();
+  ```
+</Accordion>
+
+## Quick Reference: API Changes
+
+| v8 API | v9+ API |
+|--------|----------|
+| `getCurrentHub()` | `getClient()`, `getCurrentScope()` |
+| `configureScope()` | `getCurrentScope().method()` |
+| `Hub.getClient()` | `getClient()` |
+| `beforeSendSpan` returns `null` | Use integration `shouldCreateSpan*` |
+| `metrics.increment()` | Removed |
+| `debugIntegration()` | Use `beforeSend` hook |
+| `processThreadBreadcrumbIntegration` | `childProcessIntegration` |
+
+## Getting Help
+
+If you encounter issues:
+
+1. Check the [v9 migration guide](https://docs.sentry.io/platforms/javascript/migration/v8-to-v9/)
+2. Check the [v10 migration guide](https://docs.sentry.io/platforms/javascript/migration/v9-to-v10/)
+3. Search [GitHub issues](https://github.com/getsentry/sentry-javascript/issues)
+4. Ask in [Discord](https://discord.gg/sentry)
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="General Upgrading Guide" href="/guides/migration/upgrading">
+    Best practices for upgrading Sentry
+  </Card>
+  <Card title="Custom Integrations" href="/guides/advanced/custom-integrations">
+    Build custom integrations
+  </Card>
+</CardGroup>

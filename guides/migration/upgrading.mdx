@@ -1,0 +1,475 @@
+---
+title: General Upgrading Guide
+description: Best practices and strategies for upgrading the Sentry JavaScript SDK
+---
+
+This guide provides general advice for upgrading between Sentry SDK versions safely and efficiently.
+
+## Before You Upgrade
+
+### 1. Review the Changelog
+
+Always read the changelog for the target version:
+
+- [GitHub Releases](https://github.com/getsentry/sentry-javascript/releases)
+- [CHANGELOG.md](https://github.com/getsentry/sentry-javascript/blob/develop/CHANGELOG.md)
+- [Migration Guides](https://github.com/getsentry/sentry-javascript/tree/develop/docs/migration)
+
+### 2. Check Your Current Version
+
+```bash
+npm list @sentry/browser
+# or
+yarn list @sentry/browser
+```
+
+### 3. Review Deprecation Warnings
+
+Upgrade to the latest version in your current major version first:
+
+```bash
+# Example: If on 7.x, upgrade to latest 7.x
+npm install @sentry/browser@^7.0.0
+```
+
+Fix all deprecation warnings before upgrading major versions.
+
+## Upgrade Strategies
+
+### Minor/Patch Upgrades
+
+Minor and patch upgrades are safe and backwards compatible:
+
+```bash
+# Update to latest patch
+npm update @sentry/browser
+
+# Update to specific version
+npm install @sentry/browser@10.5.0
+```
+
+### Major Version Upgrades
+
+Major upgrades require more care:
+
+**1. Test in Development First:**
+
+```bash
+# Install new version
+npm install @sentry/browser@^10.0.0
+
+# Run tests
+npm test
+
+# Test locally
+npm run dev
+```
+
+**2. Create a Branch:**
+
+```bash
+git checkout -b upgrade-sentry-v10
+npm install @sentry/browser@^10.0.0
+```
+
+**3. Update All Sentry Packages:**
+
+```bash
+# Update all @sentry/* packages to the same version
+npm install \
+  @sentry/browser@^10.0.0 \
+  @sentry/react@^10.0.0
+```
+
+<Warning>
+All Sentry packages should be on the same major version. Mixing versions can cause issues.
+</Warning>
+
+**4. Run Migration Tool:**
+
+For v7 to v8, use the automated migration tool:
+
+```bash
+npx @sentry/migr8@latest
+```
+
+**5. Manual Updates:**
+
+Review and update code that the tool couldn't fix automatically.
+
+**6. Test Thoroughly:**
+
+```bash
+npm run test
+npm run build
+npm run lint
+```
+
+**7. Deploy to Staging:**
+
+Test in a staging environment before production.
+
+## Upgrading Multiple Versions
+
+If you're several major versions behind:
+
+### Skip Intermediate Versions (Recommended)
+
+You can usually skip directly to the latest version:
+
+```bash
+# From v7 directly to v10
+npm install @sentry/browser@^10.0.0
+```
+
+Then review all migration guides:
+- [v7 to v8](/guides/migration/v7-to-v8)
+- [v8 to v9](https://docs.sentry.io/platforms/javascript/migration/v8-to-v9/)
+- [v9 to v10](https://docs.sentry.io/platforms/javascript/migration/v9-to-v10/)
+
+### Incremental Upgrades (Safer)
+
+For large or complex applications:
+
+```bash
+# Upgrade incrementally
+npm install @sentry/browser@^8.0.0  # v7 → v8
+# Test, fix issues
+npm install @sentry/browser@^9.0.0  # v8 → v9
+# Test, fix issues
+npm install @sentry/browser@^10.0.0 # v9 → v10
+# Test, fix issues
+```
+
+## Common Upgrade Tasks
+
+### Update Import Statements
+
+Major versions often reorganize exports:
+
+**v7 to v8:**
+
+```javascript
+// Before
+import { BrowserTracing } from '@sentry/tracing';
+import { Replay } from '@sentry/replay';
+
+// After
+import {
+  browserTracingIntegration,
+  replayIntegration,
+} from '@sentry/browser';
+```
+
+### Update Integration Syntax
+
+**v7 to v8:**
+
+```javascript
+// Before
+integrations: [new Sentry.Replay()]
+
+// After
+integrations: [Sentry.replayIntegration()]
+```
+
+### Update Performance API
+
+**v7 to v8:**
+
+```javascript
+// Before
+const transaction = Sentry.startTransaction({ name: 'op' });
+transaction.finish();
+
+// After
+import { startSpan } from '@sentry/browser';
+startSpan({ name: 'op' }, () => {
+  // Work here
+});
+```
+
+## Testing Your Upgrade
+
+### 1. Unit Tests
+
+Ensure existing tests pass:
+
+```bash
+npm test
+```
+
+### 2. Type Checking
+
+If using TypeScript:
+
+```bash
+npx tsc --noEmit
+```
+
+### 3. Build
+
+Ensure the project builds:
+
+```bash
+npm run build
+```
+
+### 4. Manual Testing
+
+Test key functionality:
+
+- Error capturing works
+- Performance monitoring works
+- Source maps work in production
+- Integrations work (Replay, Feedback, etc.)
+
+### 5. Staging Deployment
+
+Deploy to a staging environment and verify:
+
+- Events appear in Sentry
+- Stack traces are readable
+- Performance data is captured
+- No console errors
+
+## Rollback Plan
+
+Always have a rollback strategy:
+
+### 1. Git Revert
+
+```bash
+git revert <commit-hash>
+```
+
+### 2. Package Lock
+
+Keep old `package-lock.json` or `yarn.lock`:
+
+```bash
+git checkout main -- package-lock.json
+npm install
+```
+
+### 3. Version Pin
+
+Temporarily pin to old version:
+
+```json
+{
+  "dependencies": {
+    "@sentry/browser": "7.118.0"
+  }
+}
+```
+
+## Framework-Specific Considerations
+
+### Next.js
+
+Next.js SDK has additional requirements:
+
+```javascript
+// v8+ requires instrumentation.ts
+export async function register() {
+  if (process.env.NEXT_RUNTIME === 'nodejs') {
+    await import('./sentry.server.config');
+  }
+}
+```
+
+See [Next.js migration guide](https://docs.sentry.io/platforms/javascript/guides/nextjs/migration/) for details.
+
+### Node.js
+
+v8+ requires initialization before imports:
+
+```javascript
+// MUST be first
+import * as Sentry from '@sentry/node';
+Sentry.init({ dsn: '__DSN__' });
+
+// Then other imports
+import express from 'express';
+```
+
+### React
+
+Update Error Boundary usage:
+
+```javascript
+// v9+ error types changed
+<ErrorBoundary
+  onError={(error: unknown) => {
+    if (error instanceof Error) {
+      console.log(error.message);
+    }
+  }}
+>
+```
+
+## Troubleshooting
+
+<Accordion title="Build errors after upgrade">
+  **Symptoms:** TypeScript or build errors
+  
+  **Solutions:**
+  1. Update TypeScript: `npm install typescript@latest`
+  2. Clear build cache: `rm -rf node_modules/.cache`
+  3. Reinstall dependencies: `rm -rf node_modules && npm install`
+</Accordion>
+
+<Accordion title="Runtime errors in production">
+  **Symptoms:** Errors in production that don't appear in development
+  
+  **Solutions:**
+  1. Check source maps are uploaded correctly
+  2. Verify release name matches between SDK and uploaded source maps
+  3. Check browser compatibility (especially for v8+)
+</Accordion>
+
+<Accordion title="Missing events in Sentry">
+  **Symptoms:** Events not appearing after upgrade
+  
+  **Solutions:**
+  1. Check console for SDK errors
+  2. Verify DSN is correct
+  3. Check `enabled` option isn't set to `false`
+  4. Verify sampling rates aren't too low
+</Accordion>
+
+<Accordion title="Performance data not captured">
+  **Symptoms:** No transactions in Sentry
+  
+  **Solutions:**
+  1. Ensure `tracesSampleRate` is set: `tracesSampleRate: 0.1`
+  2. Check integrations are loaded: `browserTracingIntegration()`
+  3. For Node.js v8+, ensure Sentry is initialized first
+</Accordion>
+
+## Best Practices
+
+### 1. Upgrade Regularly
+
+Stay within 1-2 major versions of the latest:
+
+- Get new features and fixes
+- Easier upgrades (less breaking changes to handle)
+- Better security
+- Continued support
+
+### 2. Use Version Ranges
+
+Allow automatic patch updates:
+
+```json
+{
+  "dependencies": {
+    "@sentry/browser": "^10.0.0" // Gets 10.x.x updates
+  }
+}
+```
+
+### 3. Monitor Sentry Releases
+
+Subscribe to releases:
+
+- [GitHub Releases](https://github.com/getsentry/sentry-javascript/releases)
+- [Sentry Blog](https://blog.sentry.io/)
+- [@getsentry on Twitter](https://twitter.com/getsentry)
+
+### 4. Test Before Production
+
+Always test in staging:
+
+```bash
+# Staging deployment
+NODE_ENV=staging npm run deploy
+
+# Monitor for issues
+# Then deploy to production
+NODE_ENV=production npm run deploy
+```
+
+### 5. Keep Dependencies Updated
+
+Update framework and build tools too:
+
+```bash
+npm outdated
+npm update
+```
+
+### 6. Document Your Configuration
+
+Maintain documentation of your Sentry setup:
+
+```javascript
+// sentry.config.js
+/**
+ * Sentry Configuration
+ * Version: 10.x
+ * 
+ * Features enabled:
+ * - Performance monitoring (10% sampling)
+ * - Session replay on errors
+ * - User feedback
+ * 
+ * Last updated: 2024-03-05
+ */
+export const sentryConfig = {
+  dsn: process.env.SENTRY_DSN,
+  environment: process.env.NODE_ENV,
+  tracesSampleRate: 0.1,
+  // ...
+};
+```
+
+## Version-Specific Guides
+
+<CardGroup cols={2}>
+  <Card title="v7 to v8" href="/guides/migration/v7-to-v8">
+    Major changes in v8
+  </Card>
+  <Card title="v8 to v10" href="/guides/migration/v8-to-v10">
+    Changes in v9 and v10
+  </Card>
+</CardGroup>
+
+## Getting Help
+
+If you encounter issues during an upgrade:
+
+1. **Check docs:** [docs.sentry.io](https://docs.sentry.io)
+2. **Search issues:** [github.com/getsentry/sentry-javascript/issues](https://github.com/getsentry/sentry-javascript/issues)
+3. **Ask community:** [discord.gg/sentry](https://discord.gg/sentry)
+4. **Contact support:** For paid plans
+
+## Upgrade Checklist
+
+- [ ] Review changelog and migration guides
+- [ ] Check current version
+- [ ] Create upgrade branch
+- [ ] Update all `@sentry/*` packages
+- [ ] Run migration tool (if available)
+- [ ] Update imports and API usage
+- [ ] Update configuration
+- [ ] Run tests
+- [ ] Test locally
+- [ ] Deploy to staging
+- [ ] Monitor staging for issues
+- [ ] Deploy to production
+- [ ] Monitor production
+- [ ] Update documentation
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Setup Guide" href="/guides/configuration/setup">
+    Configure the SDK
+  </Card>
+  <Card title="Best Practices" href="/guides/best-practices/error-handling">
+    Learn best practices
+  </Card>
+</CardGroup>

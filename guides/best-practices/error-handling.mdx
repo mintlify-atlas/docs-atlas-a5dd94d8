@@ -1,0 +1,652 @@
+---
+title: Error Handling Best Practices
+description: Effective strategies for capturing and managing errors with Sentry
+---
+
+Proper error handling ensures you capture actionable information while avoiding noise and maintaining application stability.
+
+## Capturing Errors
+
+### Automatic Error Capture
+
+Sentry automatically captures unhandled errors and promise rejections:
+
+```javascript
+import * as Sentry from '@sentry/browser';
+
+Sentry.init({
+  dsn: '__DSN__',
+  integrations: [
+    // Enabled by default
+    Sentry.globalHandlersIntegration(),
+  ],
+});
+
+// These are captured automatically:
+throw new Error('Uncaught error');
+
+Promise.reject(new Error('Unhandled rejection'));
+
+window.addEventListener('error', (event) => {
+  // Captured automatically
+});
+```
+
+### Manual Error Capture
+
+Capture errors in try-catch blocks:
+
+```javascript
+try {
+  riskyOperation();
+} catch (error) {
+  Sentry.captureException(error);
+  // Optionally rethrow
+  throw error;
+}
+```
+
+<Tip>
+Always capture errors before rethrowing them to ensure they're sent to Sentry even if caught by another handler.
+</Tip>
+
+### Capturing Messages
+
+For non-error events, use `captureMessage`:
+
+```javascript
+// Warning level
+Sentry.captureMessage('Something unusual happened', 'warning');
+
+// Info level
+Sentry.captureMessage('User performed action', 'info');
+
+// Error level
+Sentry.captureMessage('Critical system state', 'error');
+```
+
+## Adding Context
+
+### User Context
+
+Identify users to track who experiences errors:
+
+```javascript
+Sentry.setUser({
+  id: '12345',
+  username: 'john_doe',
+  email: 'john@example.com',
+  ip_address: '{{auto}}', // Auto-detect IP
+});
+
+// Clear user on logout
+Sentry.setUser(null);
+```
+
+<Warning>
+Be mindful of privacy regulations (GDPR, CCPA) when setting user data. Only include PII if you have user consent.
+</Warning>
+
+### Tags
+
+Add searchable key-value pairs:
+
+```javascript
+// Set tags globally
+Sentry.setTags({
+  environment: 'production',
+  feature: 'checkout',
+});
+
+// Set a single tag
+Sentry.setTag('page_locale', 'en-US');
+
+// Set tags for a specific error
+Sentry.withScope((scope) => {
+  scope.setTag('section', 'payment');
+  Sentry.captureException(new Error('Payment failed'));
+});
+```
+
+### Extra Context
+
+Add structured data to events:
+
+```javascript
+Sentry.setContext('character', {
+  name: 'Mighty Fighter',
+  level: 42,
+  class: 'warrior',
+});
+
+// For a specific error
+Sentry.withScope((scope) => {
+  scope.setContext('order', {
+    id: 'order-123',
+    items: 5,
+    total: 99.99,
+  });
+  Sentry.captureException(new Error('Order processing failed'));
+});
+```
+
+### Fingerprinting
+
+Control how errors are grouped:
+
+```javascript
+Sentry.withScope((scope) => {
+  scope.setFingerprint(['{{ default }}', 'custom-group']);
+  Sentry.captureException(error);
+});
+
+// Dynamic fingerprinting based on error
+try {
+  await apiCall();
+} catch (error) {
+  Sentry.withScope((scope) => {
+    if (error.code === 'RATE_LIMIT') {
+      scope.setFingerprint(['rate-limit', error.endpoint]);
+    } else {
+      scope.setFingerprint(['{{ default }}']);
+    }
+    Sentry.captureException(error);
+  });
+}
+```
+
+## Breadcrumbs
+
+Breadcrumbs provide a trail of events leading to an error:
+
+```javascript
+// Manual breadcrumbs
+Sentry.addBreadcrumb({
+  category: 'auth',
+  message: 'User logged in',
+  level: 'info',
+});
+
+Sentry.addBreadcrumb({
+  category: 'api',
+  message: 'Fetching user profile',
+  level: 'info',
+  data: {
+    url: '/api/profile',
+    method: 'GET',
+  },
+});
+
+// Automatic breadcrumbs from integrations
+Sentry.init({
+  dsn: '__DSN__',
+  integrations: [
+    Sentry.breadcrumbsIntegration({
+      console: true,    // Console logs
+      dom: true,        // DOM events
+      fetch: true,      // Fetch requests
+      history: true,    // Navigation
+      sentry: true,     // Sentry API calls
+      xhr: true,        // XMLHttpRequest
+    }),
+  ],
+});
+```
+
+## Scope Management
+
+### Isolation Scope
+
+Use isolation scopes for request-level context in Node.js:
+
+```javascript
+import * as Sentry from '@sentry/node';
+
+app.use((req, res, next) => {
+  Sentry.withIsolationScope((scope) => {
+    scope.setTag('request_id', req.id);
+    scope.setUser({ id: req.userId });
+    next();
+  });
+});
+```
+
+### Current Scope
+
+Modify the current scope temporarily:
+
+```javascript
+// Set data on current scope
+Sentry.getCurrentScope().setTag('feature', 'new-checkout');
+
+// Isolate scope for a specific operation
+Sentry.withScope((scope) => {
+  scope.setLevel('warning');
+  scope.setTag('transaction_type', 'refund');
+  Sentry.captureMessage('Refund processed');
+});
+// Scope changes are discarded after the callback
+```
+
+## Error Boundaries (React)
+
+Use error boundaries to catch React component errors:
+
+```javascript
+import * as Sentry from '@sentry/react';
+
+function App() {
+  return (
+    <Sentry.ErrorBoundary 
+      fallback={<ErrorFallback />}
+      showDialog
+      onError={(error, componentStack, eventId) => {
+        console.log('Error caught by boundary:', error);
+      }}
+    >
+      <YourApp />
+    </Sentry.ErrorBoundary>
+  );
+}
+
+function ErrorFallback({ error, componentStack, resetError }) {
+  return (
+    <div>
+      <h1>Something went wrong</h1>
+      <button onClick={resetError}>Try again</button>
+    </div>
+  );
+}
+```
+
+### Customizing Error Boundaries
+
+```javascript
+import { ErrorBoundary } from '@sentry/react';
+
+function MyErrorBoundary({ children }) {
+  return (
+    <ErrorBoundary
+      beforeCapture={(scope, error, errorInfo) => {
+        scope.setTag('error_boundary', 'MyErrorBoundary');
+        scope.setContext('component_stack', {
+          stack: errorInfo.componentStack,
+        });
+      }}
+      onError={(error, componentStack, eventId) => {
+        // Log to analytics
+        analytics.track('error_boundary_caught', {
+          eventId,
+          error: error.message,
+        });
+      }}
+      onReset={() => {
+        // Reset app state
+        window.location.href = '/';
+      }}
+      fallback={({ error, resetError }) => (
+        <div>
+          <h2>Oops! Something went wrong</h2>
+          <pre>{error.message}</pre>
+          <button onClick={resetError}>Reset</button>
+        </div>
+      )}
+    >
+      {children}
+    </ErrorBoundary>
+  );
+}
+```
+
+## Async Error Handling
+
+### Promises
+
+```javascript
+// Unhandled rejections are caught automatically
+fetch('/api/data')
+  .then(response => response.json())
+  .then(data => processData(data));
+// If any step throws, Sentry captures it
+
+// Manual capture in catch
+fetch('/api/data')
+  .then(response => response.json())
+  .catch(error => {
+    Sentry.captureException(error);
+    throw error; // Rethrow if needed
+  });
+```
+
+### Async/Await
+
+```javascript
+async function fetchUserData(userId) {
+  try {
+    const response = await fetch(`/api/users/${userId}`);
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    Sentry.captureException(error);
+    // Add context
+    Sentry.setContext('api_call', {
+      userId,
+      endpoint: '/api/users',
+    });
+    throw error;
+  }
+}
+```
+
+## Node.js Error Handling
+
+### Express Error Handler
+
+```javascript
+import express from 'express';
+import * as Sentry from '@sentry/node';
+
+const app = express();
+
+// Add Sentry error handler AFTER all controllers and BEFORE other error handlers
+app.use(Sentry.setupExpressErrorHandler(app));
+
+// Your error handler
+app.use((err, req, res, next) => {
+  res.status(500).send('Internal Server Error');
+});
+```
+
+### Unhandled Rejections
+
+```javascript
+import * as Sentry from '@sentry/node';
+
+Sentry.init({
+  dsn: '__DSN__',
+  integrations: [
+    // Enabled by default
+    Sentry.onUncaughtExceptionIntegration({
+      onFatalError: (error) => {
+        console.error('Fatal error:', error);
+        process.exit(1);
+      },
+    }),
+    Sentry.onUnhandledRejectionIntegration({
+      mode: 'warn', // 'warn' or 'strict'
+    }),
+  ],
+});
+```
+
+## Enriching Error Data
+
+### Stack Traces
+
+```javascript
+import * as Sentry from '@sentry/browser';
+
+Sentry.init({
+  dsn: '__DSN__',
+  attachStacktrace: true, // Attach stack traces to messages
+});
+```
+
+### Source Maps
+
+Ensure source maps are uploaded for readable stack traces:
+
+```javascript
+// next.config.js (Next.js)
+const { withSentryConfig } = require('@sentry/nextjs');
+
+module.exports = withSentryConfig(
+  {
+    // Next.js config
+  },
+  {
+    // Sentry webpack plugin config
+    silent: true,
+    org: 'your-org',
+    project: 'your-project',
+  }
+);
+```
+
+### Context Lines Integration
+
+```javascript
+import { contextLinesIntegration } from '@sentry/browser';
+
+Sentry.init({
+  dsn: '__DSN__',
+  integrations: [
+    contextLinesIntegration(), // Shows source code around error
+  ],
+});
+```
+
+## Handling Specific Error Types
+
+### Network Errors
+
+```javascript
+async function fetchWithErrorHandling(url) {
+  try {
+    const response = await fetch(url);
+    
+    if (!response.ok) {
+      const error = new Error(`HTTP ${response.status}`);
+      Sentry.withScope((scope) => {
+        scope.setTag('http_status', response.status);
+        scope.setContext('request', {
+          url,
+          method: 'GET',
+          status: response.status,
+        });
+        Sentry.captureException(error);
+      });
+      throw error;
+    }
+    
+    return response.json();
+  } catch (error) {
+    if (error.name === 'TypeError') {
+      // Network error
+      Sentry.withScope((scope) => {
+        scope.setTag('error_type', 'network');
+        scope.setLevel('warning');
+        Sentry.captureException(error);
+      });
+    }
+    throw error;
+  }
+}
+```
+
+### Validation Errors
+
+```javascript
+function validateUserInput(data) {
+  const errors = [];
+  
+  if (!data.email) {
+    errors.push('Email required');
+  }
+  
+  if (errors.length > 0) {
+    const error = new Error('Validation failed');
+    Sentry.withScope((scope) => {
+      scope.setLevel('info'); // Validation errors aren't critical
+      scope.setContext('validation', {
+        errors,
+        data: { ...data, password: '[Filtered]' },
+      });
+      Sentry.captureException(error);
+    });
+    throw error;
+  }
+}
+```
+
+## Best Practices
+
+<Accordion title="Always add context before capturing">
+  Context helps debug issues faster:
+  
+  ```javascript
+  // ❌ Bad
+  Sentry.captureException(error);
+  
+  // ✅ Good
+  Sentry.withScope((scope) => {
+    scope.setTag('feature', 'checkout');
+    scope.setContext('cart', { items: 3, total: 99.99 });
+    Sentry.captureException(error);
+  });
+  ```
+</Accordion>
+
+<Accordion title="Use error levels appropriately">
+  Set appropriate severity levels:
+  
+  ```javascript
+  // Fatal: app crashes
+  scope.setLevel('fatal');
+  
+  // Error: exceptions
+  scope.setLevel('error');
+  
+  // Warning: deprecated API usage
+  scope.setLevel('warning');
+  
+  // Info: user actions
+  scope.setLevel('info');
+  
+  // Debug: detailed logging
+  scope.setLevel('debug');
+  ```
+</Accordion>
+
+<Accordion title="Don't swallow errors silently">
+  Always log or capture errors:
+  
+  ```javascript
+  // ❌ Bad
+  try {
+    riskyOperation();
+  } catch (error) {
+    // Silent failure
+  }
+  
+  // ✅ Good
+  try {
+    riskyOperation();
+  } catch (error) {
+    Sentry.captureException(error);
+    // Handle gracefully
+    showErrorMessage();
+  }
+  ```
+</Accordion>
+
+<Accordion title="Use custom fingerprints for known errors">
+  Group related errors together:
+  
+  ```javascript
+  try {
+    await paymentGateway.process();
+  } catch (error) {
+    Sentry.withScope((scope) => {
+      if (error.code === 'INSUFFICIENT_FUNDS') {
+        scope.setFingerprint(['payment', 'insufficient-funds']);
+      }
+      Sentry.captureException(error);
+    });
+  }
+  ```
+</Accordion>
+
+<Accordion title="Monitor error rates, not just errors">
+  Use Sentry's alerts to monitor error rate increases, which can indicate new issues.
+</Accordion>
+
+## Complete Example
+
+```javascript
+import * as Sentry from '@sentry/browser';
+
+Sentry.init({
+  dsn: '__DSN__',
+  environment: 'production',
+  attachStacktrace: true,
+  
+  integrations: [
+    Sentry.breadcrumbsIntegration(),
+    Sentry.globalHandlersIntegration(),
+    Sentry.contextLinesIntegration(),
+  ],
+  
+  beforeSend(event, hint) {
+    // Filter out sensitive data
+    if (event.request?.headers) {
+      delete event.request.headers['Authorization'];
+    }
+    return event;
+  },
+});
+
+// Set user context
+function setUserContext(user) {
+  Sentry.setUser({
+    id: user.id,
+    username: user.username,
+    email: user.email,
+  });
+}
+
+// API call with error handling
+async function apiCall(endpoint, options = {}) {
+  try {
+    const response = await fetch(endpoint, options);
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+    
+    return await response.json();
+  } catch (error) {
+    Sentry.withScope((scope) => {
+      scope.setTag('api_endpoint', endpoint);
+      scope.setContext('request', {
+        endpoint,
+        method: options.method || 'GET',
+        status: error.status,
+      });
+      
+      if (error.status >= 500) {
+        scope.setLevel('error');
+      } else if (error.status >= 400) {
+        scope.setLevel('warning');
+      }
+      
+      Sentry.captureException(error);
+    });
+    
+    throw error;
+  }
+}
+
+export { apiCall, setUserContext };
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Performance Monitoring" href="/guides/best-practices/performance">
+    Monitor application performance
+  </Card>
+  <Card title="Source Maps" href="/guides/best-practices/sourcemaps">
+    Configure source maps for readable errors
+  </Card>
+</CardGroup>

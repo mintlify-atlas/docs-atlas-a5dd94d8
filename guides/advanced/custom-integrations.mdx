@@ -1,0 +1,632 @@
+---
+title: Custom Integrations
+description: Build custom integrations to extend Sentry SDK functionality
+---
+
+Custom integrations allow you to extend the Sentry SDK with your own functionality, such as capturing custom data, filtering events, or integrating with third-party services.
+
+## Integration Basics
+
+An integration is a function that returns an integration object with specific methods:
+
+```javascript
+import { defineIntegration } from '@sentry/core';
+
+const myIntegration = defineIntegration(() => {
+  return {
+    name: 'MyIntegration',
+    
+    setupOnce() {
+      // Called once when the integration is set up
+    },
+    
+    setup(client) {
+      // Called for each client
+    },
+    
+    processEvent(event, hint, client) {
+      // Process events before they're sent
+      return event;
+    },
+  };
+});
+
+export { myIntegration };
+```
+
+## Simple Integration Example
+
+Add custom data to all events:
+
+```javascript
+import { defineIntegration } from '@sentry/core';
+
+const environmentInfoIntegration = defineIntegration(() => {
+  return {
+    name: 'EnvironmentInfo',
+    
+    processEvent(event) {
+      // Add custom context to all events
+      event.contexts = event.contexts || {};
+      event.contexts.environment = {
+        screen_resolution: `${window.screen.width}x${window.screen.height}`,
+        viewport: `${window.innerWidth}x${window.innerHeight}`,
+        color_depth: window.screen.colorDepth,
+        pixel_ratio: window.devicePixelRatio,
+      };
+      
+      return event;
+    },
+  };
+});
+
+export { environmentInfoIntegration };
+```
+
+**Usage:**
+
+```javascript
+import * as Sentry from '@sentry/browser';
+import { environmentInfoIntegration } from './integrations/environment-info';
+
+Sentry.init({
+  dsn: '__DSN__',
+  integrations: [
+    environmentInfoIntegration(),
+  ],
+});
+```
+
+## Integration Lifecycle Methods
+
+### setupOnce()
+
+Called once when the SDK initializes. Use for global setup:
+
+```javascript
+const globalTrackerIntegration = defineIntegration(() => {
+  return {
+    name: 'GlobalTracker',
+    
+    setupOnce() {
+      // Set up global event listeners
+      window.addEventListener('online', () => {
+        Sentry.addBreadcrumb({
+          message: 'Network online',
+          level: 'info',
+        });
+      });
+      
+      window.addEventListener('offline', () => {
+        Sentry.addBreadcrumb({
+          message: 'Network offline',
+          level: 'warning',
+        });
+      });
+    },
+  };
+});
+```
+
+### setup(client)
+
+Called for each client instance. Use for client-specific setup:
+
+```javascript
+const clientConfigIntegration = defineIntegration(() => {
+  return {
+    name: 'ClientConfig',
+    
+    setup(client) {
+      // Access client configuration
+      const options = client.getOptions();
+      console.log('Client environment:', options.environment);
+      
+      // Add event processor to this client
+      client.on('beforeSendEvent', (event) => {
+        console.log('Sending event:', event.event_id);
+      });
+    },
+  };
+});
+```
+
+### processEvent(event, hint, client)
+
+Process events before they're sent:
+
+```javascript
+const eventEnricherIntegration = defineIntegration(() => {
+  return {
+    name: 'EventEnricher',
+    
+    processEvent(event, hint, client) {
+      // Add custom tags
+      event.tags = {
+        ...event.tags,
+        custom_build: process.env.BUILD_ID,
+      };
+      
+      // Access the original exception
+      const error = hint.originalException;
+      if (error instanceof TypeError) {
+        event.tags.error_type = 'type_error';
+      }
+      
+      // Modify event based on client options
+      const options = client.getOptions();
+      if (options.environment === 'development') {
+        event.level = 'debug';
+      }
+      
+      return event;
+    },
+  };
+});
+```
+
+## Advanced Integrations
+
+### Automatic Instrumentation
+
+Capture breadcrumbs from custom events:
+
+```javascript
+import { defineIntegration } from '@sentry/core';
+import { addBreadcrumb } from '@sentry/browser';
+
+const customEventsIntegration = defineIntegration(() => {
+  let cleanup: (() => void) | undefined;
+  
+  return {
+    name: 'CustomEvents',
+    
+    setupOnce() {
+      const handler = (event: CustomEvent) => {
+        addBreadcrumb({
+          category: 'custom-event',
+          message: event.type,
+          level: 'info',
+          data: event.detail,
+        });
+      };
+      
+      // Listen to custom events
+      window.addEventListener('app:navigation', handler);
+      window.addEventListener('app:action', handler);
+      
+      // Store cleanup function
+      cleanup = () => {
+        window.removeEventListener('app:navigation', handler);
+        window.removeEventListener('app:action', handler);
+      };
+    },
+    
+    // Optional: cleanup on teardown
+    teardown() {
+      cleanup?.();
+    },
+  };
+});
+
+export { customEventsIntegration };
+```
+
+### Third-Party Service Integration
+
+Integrate with analytics or logging services:
+
+```javascript
+import { defineIntegration } from '@sentry/core';
+
+const analyticsIntegration = defineIntegration((options = {}) => {
+  return {
+    name: 'Analytics',
+    
+    processEvent(event, hint) {
+      // Send error to analytics
+      if (window.analytics && event.exception) {
+        window.analytics.track('Error Occurred', {
+          message: event.message,
+          level: event.level,
+          event_id: event.event_id,
+        });
+      }
+      
+      return event;
+    },
+  };
+});
+
+export { analyticsIntegration };
+```
+
+### Performance Monitoring Integration
+
+Add custom performance tracking:
+
+```javascript
+import { defineIntegration } from '@sentry/core';
+import { startSpan } from '@sentry/browser';
+
+const apiTrackerIntegration = defineIntegration(() => {
+  return {
+    name: 'ApiTracker',
+    
+    setupOnce() {
+      // Intercept fetch calls
+      const originalFetch = window.fetch;
+      
+      window.fetch = async function(...args) {
+        const url = args[0] instanceof Request ? args[0].url : args[0];
+        
+        return startSpan(
+          {
+            name: `fetch ${url}`,
+            op: 'http.client',
+            attributes: {
+              'http.url': url,
+              'http.method': args[1]?.method || 'GET',
+            },
+          },
+          async (span) => {
+            try {
+              const response = await originalFetch.apply(this, args);
+              span?.setAttribute('http.status_code', response.status);
+              return response;
+            } catch (error) {
+              span?.setAttribute('error', true);
+              throw error;
+            }
+          }
+        );
+      };
+    },
+  };
+});
+
+export { apiTrackerIntegration };
+```
+
+## Integration with Options
+
+Accept configuration options:
+
+```javascript
+import { defineIntegration } from '@sentry/core';
+
+interface FeatureFlagOptions {
+  flagProvider?: any;
+  captureFlags?: boolean;
+}
+
+const featureFlagIntegration = defineIntegration((options: FeatureFlagOptions = {}) => {
+  const {
+    flagProvider,
+    captureFlags = true,
+  } = options;
+  
+  return {
+    name: 'FeatureFlags',
+    
+    processEvent(event) {
+      if (!captureFlags || !flagProvider) {
+        return event;
+      }
+      
+      // Add feature flags to event
+      const flags = flagProvider.getAllFlags();
+      event.contexts = event.contexts || {};
+      event.contexts.feature_flags = flags;
+      
+      return event;
+    },
+  };
+});
+
+export { featureFlagIntegration };
+```
+
+**Usage:**
+
+```javascript
+import { featureFlagIntegration } from './integrations/feature-flags';
+
+Sentry.init({
+  dsn: '__DSN__',
+  integrations: [
+    featureFlagIntegration({
+      flagProvider: myFlagProvider,
+      captureFlags: true,
+    }),
+  ],
+});
+```
+
+## Client Hooks
+
+Listen to SDK events:
+
+```javascript
+import { defineIntegration } from '@sentry/core';
+
+const monitoringIntegration = defineIntegration(() => {
+  return {
+    name: 'Monitoring',
+    
+    setup(client) {
+      // Hook into various events
+      client.on('beforeSendEvent', (event, hint) => {
+        console.log('About to send event:', event.event_id);
+      });
+      
+      client.on('afterSendEvent', (event, sendResponse) => {
+        console.log('Event sent:', event.event_id, sendResponse);
+      });
+      
+      client.on('createSession', (session) => {
+        console.log('Session created:', session.sid);
+      });
+      
+      client.on('beforeEnvelope', (envelope) => {
+        console.log('About to send envelope');
+      });
+    },
+  };
+});
+
+export { monitoringIntegration };
+```
+
+## Filtering Events
+
+Drop events based on custom logic:
+
+```javascript
+import { defineIntegration } from '@sentry/core';
+
+const rateLimitIntegration = defineIntegration((maxEventsPerMinute = 10) => {
+  const events: number[] = [];
+  
+  return {
+    name: 'RateLimit',
+    
+    processEvent(event) {
+      const now = Date.now();
+      const oneMinuteAgo = now - 60000;
+      
+      // Remove old timestamps
+      const recentEvents = events.filter(time => time > oneMinuteAgo);
+      
+      // Check rate limit
+      if (recentEvents.length >= maxEventsPerMinute) {
+        console.warn('Rate limit exceeded, dropping event');
+        return null; // Drop the event
+      }
+      
+      // Track this event
+      events.push(now);
+      
+      return event;
+    },
+  };
+});
+
+export { rateLimitIntegration };
+```
+
+## Testing Integrations
+
+```javascript
+import { describe, it, expect, vi } from 'vitest';
+import { myIntegration } from './my-integration';
+import { getClient, init } from '@sentry/browser';
+
+describe('MyIntegration', () => {
+  beforeEach(() => {
+    init({
+      dsn: 'https://test@sentry.io/123',
+      integrations: [myIntegration()],
+    });
+  });
+  
+  it('should add custom data to events', () => {
+    const client = getClient();
+    const integration = client?.getIntegrationByName('MyIntegration');
+    
+    expect(integration).toBeDefined();
+    
+    // Test processEvent
+    const event = { message: 'test' };
+    const processed = integration?.processEvent(event, {}, client!);
+    
+    expect(processed?.contexts?.custom).toBeDefined();
+  });
+});
+```
+
+## Best Practices
+
+<Accordion title="Use defineIntegration helper">
+  Always use `defineIntegration` for proper typing and structure:
+  
+  ```javascript
+  import { defineIntegration } from '@sentry/core';
+  
+  const myIntegration = defineIntegration(() => {
+    return { name: 'MyIntegration', /* ... */ };
+  });
+  ```
+</Accordion>
+
+<Accordion title="Handle errors gracefully">
+  Don't let integration errors crash the app:
+  
+  ```javascript
+  processEvent(event) {
+    try {
+      // Your logic
+      return event;
+    } catch (error) {
+      console.error('Integration error:', error);
+      return event; // Return original event
+    }
+  }
+  ```
+</Accordion>
+
+<Accordion title="Provide cleanup in teardown">
+  Clean up resources when the integration is removed:
+  
+  ```javascript
+  setupOnce() {
+    window.addEventListener('event', handler);
+  },
+  
+  teardown() {
+    window.removeEventListener('event', handler);
+  }
+  ```
+</Accordion>
+
+<Accordion title="Document your integration">
+  Provide clear documentation on:
+  - What the integration does
+  - Available options
+  - Performance impact
+  - Browser/Node compatibility
+</Accordion>
+
+<Accordion title="Keep integrations focused">
+  Each integration should have a single, clear purpose. Don't create "god integrations" that do too much.
+</Accordion>
+
+## Complete Example
+
+```javascript
+import { defineIntegration } from '@sentry/core';
+import { addBreadcrumb } from '@sentry/browser';
+
+interface UserActivityOptions {
+  trackClicks?: boolean;
+  trackScrolls?: boolean;
+  trackPageVisibility?: boolean;
+}
+
+const userActivityIntegration = defineIntegration((options: UserActivityOptions = {}) => {
+  const {
+    trackClicks = true,
+    trackScrolls = true,
+    trackPageVisibility = true,
+  } = options;
+  
+  const handlers: Array<() => void> = [];
+  
+  return {
+    name: 'UserActivity',
+    
+    setupOnce() {
+      // Track clicks
+      if (trackClicks) {
+        const clickHandler = (event: MouseEvent) => {
+          const target = event.target as HTMLElement;
+          addBreadcrumb({
+            category: 'ui.click',
+            message: `Clicked: ${target.tagName}`,
+            data: {
+              tag: target.tagName,
+              id: target.id,
+              className: target.className,
+            },
+          });
+        };
+        document.addEventListener('click', clickHandler);
+        handlers.push(() => document.removeEventListener('click', clickHandler));
+      }
+      
+      // Track scrolls
+      if (trackScrolls) {
+        let lastScroll = 0;
+        const scrollHandler = () => {
+          const now = Date.now();
+          if (now - lastScroll > 1000) { // Throttle
+            addBreadcrumb({
+              category: 'ui.scroll',
+              message: 'Page scrolled',
+              data: {
+                scrollY: window.scrollY,
+                scrollX: window.scrollX,
+              },
+            });
+            lastScroll = now;
+          }
+        };
+        window.addEventListener('scroll', scrollHandler, { passive: true });
+        handlers.push(() => window.removeEventListener('scroll', scrollHandler));
+      }
+      
+      // Track page visibility
+      if (trackPageVisibility) {
+        const visibilityHandler = () => {
+          addBreadcrumb({
+            category: 'ui.visibility',
+            message: `Page ${document.hidden ? 'hidden' : 'visible'}`,
+            level: document.hidden ? 'info' : 'debug',
+          });
+        };
+        document.addEventListener('visibilitychange', visibilityHandler);
+        handlers.push(() => document.removeEventListener('visibilitychange', visibilityHandler));
+      }
+    },
+    
+    processEvent(event, hint, client) {
+      // Add user activity summary
+      const options = client.getOptions();
+      event.tags = {
+        ...event.tags,
+        has_user_activity: 'true',
+        environment: options.environment,
+      };
+      
+      return event;
+    },
+    
+    teardown() {
+      // Cleanup all handlers
+      handlers.forEach(cleanup => cleanup());
+      handlers.length = 0;
+    },
+  };
+});
+
+export { userActivityIntegration };
+```
+
+**Usage:**
+
+```javascript
+import * as Sentry from '@sentry/browser';
+import { userActivityIntegration } from './integrations/user-activity';
+
+Sentry.init({
+  dsn: '__DSN__',
+  integrations: [
+    userActivityIntegration({
+      trackClicks: true,
+      trackScrolls: true,
+      trackPageVisibility: true,
+    }),
+  ],
+});
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Custom Transports" href="/guides/advanced/custom-transports">
+    Build custom transport layers
+  </Card>
+  <Card title="OpenTelemetry" href="/guides/advanced/opentelemetry">
+    Integrate with OpenTelemetry
+  </Card>
+</CardGroup>

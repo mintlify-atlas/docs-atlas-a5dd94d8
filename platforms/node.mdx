@@ -1,0 +1,677 @@
+---
+title: Node.js SDK
+description: Error monitoring and performance tracking for Node.js applications
+---
+
+The Sentry Node.js SDK provides comprehensive error monitoring and performance tracking for Node.js applications using OpenTelemetry instrumentation.
+
+## Installation
+
+<CodeGroup>
+```bash npm
+npm install @sentry/node
+```
+
+```bash yarn
+yarn add @sentry/node
+```
+
+```bash pnpm
+pnpm add @sentry/node
+```
+</CodeGroup>
+
+## Basic Setup
+
+Create an instrumentation file and import it before any other code:
+
+```javascript
+// instrument.js
+import * as Sentry from '@sentry/node';
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  
+  // Performance Monitoring
+  tracesSampleRate: 1.0,
+  
+  // Profiling
+  profilesSampleRate: 1.0,
+});
+```
+
+Import the instrumentation file first in your application:
+
+```javascript
+// app.js
+import './instrument.js';
+import express from 'express';
+
+const app = express();
+
+app.get('/', (req, res) => {
+  res.send('Hello World!');
+});
+
+app.listen(3000);
+```
+
+Or use Node.js `--import` flag:
+
+```bash
+node --import ./instrument.js app.js
+```
+
+## Express Integration
+
+Automatic instrumentation for Express.js:
+
+```javascript
+import * as Sentry from '@sentry/node';
+import express from 'express';
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  integrations: [
+    Sentry.expressIntegration(),
+  ],
+  tracesSampleRate: 1.0,
+});
+
+const app = express();
+
+// Add Sentry error handler - must be before other error handlers
+app.use(Sentry.expressErrorHandler());
+
+// Other error handlers
+app.use((err, req, res, next) => {
+  res.status(500).send('Internal Server Error');
+});
+
+app.listen(3000);
+```
+
+## Framework Integrations
+
+<Tabs>
+  <Tab title="Fastify">
+    ```javascript
+    import * as Sentry from '@sentry/node';
+    import Fastify from 'fastify';
+
+    Sentry.init({
+      dsn: 'YOUR_DSN_HERE',
+      integrations: [
+        Sentry.fastifyIntegration(),
+      ],
+      tracesSampleRate: 1.0,
+    });
+
+    const fastify = Fastify();
+
+    // Add error handler
+    fastify.setErrorHandler(Sentry.setupFastifyErrorHandler(fastify));
+
+    fastify.listen({ port: 3000 });
+    ```
+  </Tab>
+
+  <Tab title="Koa">
+    ```javascript
+    import * as Sentry from '@sentry/node';
+    import Koa from 'koa';
+
+    Sentry.init({
+      dsn: 'YOUR_DSN_HERE',
+      integrations: [
+        Sentry.koaIntegration(),
+      ],
+      tracesSampleRate: 1.0,
+    });
+
+    const app = new Koa();
+
+    // Add error handler middleware
+    app.use(Sentry.setupKoaErrorHandler(app));
+
+    app.listen(3000);
+    ```
+  </Tab>
+
+  <Tab title="Hapi">
+    ```javascript
+    import * as Sentry from '@sentry/node';
+    import Hapi from '@hapi/hapi';
+
+    Sentry.init({
+      dsn: 'YOUR_DSN_HERE',
+      integrations: [
+        Sentry.hapiIntegration(),
+      ],
+      tracesSampleRate: 1.0,
+    });
+
+    const server = Hapi.server({ port: 3000 });
+
+    // Add error handler
+    await server.register({
+      plugin: Sentry.setupHapiErrorHandler(server),
+    });
+
+    await server.start();
+    ```
+  </Tab>
+
+  <Tab title="Connect">
+    ```javascript
+    import * as Sentry from '@sentry/node';
+    import connect from 'connect';
+
+    Sentry.init({
+      dsn: 'YOUR_DSN_HERE',
+      integrations: [
+        Sentry.connectIntegration(),
+      ],
+      tracesSampleRate: 1.0,
+    });
+
+    const app = connect();
+
+    // Add error handler
+    app.use(Sentry.setupConnectErrorHandler());
+
+    app.listen(3000);
+    ```
+  </Tab>
+</Tabs>
+
+## Database Integrations
+
+<Tabs>
+  <Tab title="Prisma">
+    ```javascript
+    import * as Sentry from '@sentry/node';
+    import { PrismaClient } from '@prisma/client';
+
+    Sentry.init({
+      dsn: 'YOUR_DSN_HERE',
+      integrations: [
+        Sentry.prismaIntegration(),
+      ],
+      tracesSampleRate: 1.0,
+    });
+
+    const prisma = new PrismaClient();
+
+    // Database queries are automatically tracked
+    const users = await prisma.user.findMany();
+    ```
+  </Tab>
+
+  <Tab title="MongoDB">
+    ```javascript
+    import * as Sentry from '@sentry/node';
+
+    Sentry.init({
+      dsn: 'YOUR_DSN_HERE',
+      integrations: [
+        Sentry.mongoIntegration(),
+      ],
+      tracesSampleRate: 1.0,
+    });
+
+    // MongoDB operations are automatically tracked
+    ```
+  </Tab>
+
+  <Tab title="Mongoose">
+    ```javascript
+    import * as Sentry from '@sentry/node';
+
+    Sentry.init({
+      dsn: 'YOUR_DSN_HERE',
+      integrations: [
+        Sentry.mongooseIntegration(),
+      ],
+      tracesSampleRate: 1.0,
+    });
+
+    // Mongoose operations are automatically tracked
+    ```
+  </Tab>
+
+  <Tab title="PostgreSQL">
+    ```javascript
+    import * as Sentry from '@sentry/node';
+
+    Sentry.init({
+      dsn: 'YOUR_DSN_HERE',
+      integrations: [
+        Sentry.postgresIntegration(),    // pg library
+        Sentry.postgresJsIntegration(),  // postgres.js library
+      ],
+      tracesSampleRate: 1.0,
+    });
+    ```
+  </Tab>
+
+  <Tab title="MySQL">
+    ```javascript
+    import * as Sentry from '@sentry/node';
+
+    Sentry.init({
+      dsn: 'YOUR_DSN_HERE',
+      integrations: [
+        Sentry.mysqlIntegration(),   // mysql library
+        Sentry.mysql2Integration(),  // mysql2 library
+      ],
+      tracesSampleRate: 1.0,
+    });
+    ```
+  </Tab>
+
+  <Tab title="Redis">
+    ```javascript
+    import * as Sentry from '@sentry/node';
+
+    Sentry.init({
+      dsn: 'YOUR_DSN_HERE',
+      integrations: [
+        Sentry.redisIntegration(),
+      ],
+      tracesSampleRate: 1.0,
+    });
+    ```
+  </Tab>
+</Tabs>
+
+## AI SDK Integrations
+
+<Tabs>
+  <Tab title="OpenAI">
+    ```javascript
+    import * as Sentry from '@sentry/node';
+    import OpenAI from 'openai';
+
+    Sentry.init({
+      dsn: 'YOUR_DSN_HERE',
+      integrations: [
+        Sentry.openAIIntegration(),
+      ],
+      tracesSampleRate: 1.0,
+    });
+
+    const client = new OpenAI();
+
+    // Automatically tracked
+    const completion = await client.chat.completions.create({
+      model: 'gpt-4',
+      messages: [{ role: 'user', content: 'Hello!' }],
+    });
+    ```
+  </Tab>
+
+  <Tab title="Anthropic">
+    ```javascript
+    import * as Sentry from '@sentry/node';
+    import Anthropic from '@anthropic-ai/sdk';
+
+    Sentry.init({
+      dsn: 'YOUR_DSN_HERE',
+      integrations: [
+        Sentry.anthropicAIIntegration(),
+      ],
+      tracesSampleRate: 1.0,
+    });
+
+    const client = new Anthropic();
+
+    // Automatically tracked
+    const message = await client.messages.create({
+      model: 'claude-3-opus-20240229',
+      messages: [{ role: 'user', content: 'Hello!' }],
+    });
+    ```
+  </Tab>
+
+  <Tab title="Google GenAI">
+    ```javascript
+    import * as Sentry from '@sentry/node';
+    import { GoogleGenAI } from '@google/generative-ai';
+
+    Sentry.init({
+      dsn: 'YOUR_DSN_HERE',
+      integrations: [
+        Sentry.googleGenAIIntegration(),
+      ],
+      tracesSampleRate: 1.0,
+    });
+    ```
+  </Tab>
+
+  <Tab title="LangChain">
+    ```javascript
+    import * as Sentry from '@sentry/node';
+
+    Sentry.init({
+      dsn: 'YOUR_DSN_HERE',
+      integrations: [
+        Sentry.langChainIntegration(),
+      ],
+      tracesSampleRate: 1.0,
+    });
+
+    // Use callback handler
+    const handler = Sentry.createLangChainCallbackHandler();
+    ```
+  </Tab>
+
+  <Tab title="LangGraph">
+    ```javascript
+    import * as Sentry from '@sentry/node';
+
+    Sentry.init({
+      dsn: 'YOUR_DSN_HERE',
+      integrations: [
+        Sentry.langGraphIntegration(),
+      ],
+      tracesSampleRate: 1.0,
+    });
+
+    // Instrument your graph
+    Sentry.instrumentLangGraph(graph);
+    ```
+  </Tab>
+</Tabs>
+
+## Performance Monitoring
+
+### Automatic Instrumentation
+
+The SDK automatically instruments:
+- HTTP/HTTPS requests
+- Express/Fastify/Koa routes
+- Database queries
+- File system operations
+- Child processes
+
+### Custom Spans
+
+```javascript
+import * as Sentry from '@sentry/node';
+
+async function processData() {
+  return await Sentry.startSpan(
+    {
+      name: 'process-data',
+      op: 'function',
+    },
+    async () => {
+      // Your code here
+      const result = await heavyOperation();
+      return result;
+    },
+  );
+}
+```
+
+### Nested Spans
+
+```javascript
+import * as Sentry from '@sentry/node';
+
+await Sentry.startSpan(
+  { name: 'parent-operation', op: 'task' },
+  async () => {
+    await Sentry.startSpan(
+      { name: 'child-operation-1', op: 'db.query' },
+      async () => {
+        await db.query('SELECT * FROM users');
+      },
+    );
+    
+    await Sentry.startSpan(
+      { name: 'child-operation-2', op: 'http.client' },
+      async () => {
+        await fetch('https://api.example.com/data');
+      },
+    );
+  },
+);
+```
+
+## Error Handling
+
+### Automatic Capture
+
+```javascript
+import * as Sentry from '@sentry/node';
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  integrations: [
+    Sentry.onUncaughtExceptionIntegration(),
+    Sentry.onUnhandledRejectionIntegration(),
+  ],
+});
+
+// Uncaught exceptions are automatically captured
+throw new Error('This will be captured');
+```
+
+### Manual Capture
+
+```javascript
+import * as Sentry from '@sentry/node';
+
+try {
+  riskyOperation();
+} catch (error) {
+  Sentry.captureException(error, {
+    tags: {
+      section: 'data-processing',
+    },
+    extra: {
+      operation: 'user-import',
+    },
+  });
+}
+```
+
+## Context & Scope
+
+### User Context
+
+```javascript
+import * as Sentry from '@sentry/node';
+
+app.use((req, res, next) => {
+  if (req.user) {
+    Sentry.setUser({
+      id: req.user.id,
+      email: req.user.email,
+      username: req.user.username,
+    });
+  }
+  next();
+});
+```
+
+### Request Isolation
+
+```javascript
+import * as Sentry from '@sentry/node';
+
+app.get('/user/:id', async (req, res) => {
+  // Use isolation scope for request-specific context
+  Sentry.withIsolationScope((scope) => {
+    scope.setTag('user_id', req.params.id);
+    scope.setContext('request', {
+      method: req.method,
+      url: req.url,
+    });
+    
+    // Process request
+  });
+});
+```
+
+## Profiling
+
+Enable CPU profiling:
+
+```javascript
+import * as Sentry from '@sentry/node';
+import { profiler } from '@sentry/node';
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  
+  integrations: [
+    profiler(),
+  ],
+  
+  tracesSampleRate: 1.0,
+  profilesSampleRate: 1.0,
+});
+```
+
+## Cron Monitoring
+
+Monitor scheduled jobs:
+
+```javascript
+import * as Sentry from '@sentry/node';
+
+// Wrap your cron job
+await Sentry.withMonitor(
+  'my-cron-job',
+  async () => {
+    // Your cron job logic
+    await performScheduledTask();
+  },
+  {
+    schedule: {
+      type: 'crontab',
+      value: '0 * * * *', // Every hour
+    },
+    checkinMargin: 5, // minutes
+    maxRuntime: 30, // minutes
+    timezone: 'America/New_York',
+  },
+);
+```
+
+## Local Variables
+
+Capture local variables in stack traces:
+
+```javascript
+import * as Sentry from '@sentry/node';
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  integrations: [
+    Sentry.localVariablesIntegration(),
+  ],
+});
+```
+
+## Context Lines
+
+Capture source code context:
+
+```javascript
+import * as Sentry from '@sentry/node';
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  integrations: [
+    Sentry.contextLinesIntegration(),
+  ],
+});
+```
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Import First" icon="bolt">
+    Always import the instrumentation file before any other code.
+  </Card>
+  
+  <Card title="Use Integrations" icon="puzzle-piece">
+    Enable framework-specific integrations for automatic instrumentation.
+  </Card>
+  
+  <Card title="Request Isolation" icon="layer-group">
+    Use isolation scopes to separate context between requests.
+  </Card>
+  
+  <Card title="Sampling" icon="gauge">
+    Adjust sample rates in production to control costs.
+  </Card>
+</CardGroup>
+
+## Configuration
+
+<Accordion title="Complete Configuration">
+  ```javascript
+  import * as Sentry from '@sentry/node';
+
+  Sentry.init({
+    dsn: 'YOUR_DSN_HERE',
+    
+    // Environment
+    environment: 'production',
+    release: 'my-app@1.0.0',
+    serverName: process.env.HOSTNAME,
+    
+    // Performance
+    tracesSampleRate: 0.2,
+    profilesSampleRate: 0.2,
+    
+    // Integrations
+    integrations: [
+      Sentry.httpIntegration(),
+      Sentry.expressIntegration(),
+      Sentry.prismaIntegration(),
+      Sentry.contextLinesIntegration(),
+      Sentry.localVariablesIntegration(),
+    ],
+    
+    // Error filtering
+    ignoreErrors: [
+      'ECONNRESET',
+      'EPIPE',
+    ],
+    
+    beforeSend(event, hint) {
+      // Filter or modify events
+      if (event.exception) {
+        console.log('Error captured:', hint.originalException);
+      }
+      return event;
+    },
+  });
+  ```
+</Accordion>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Express" icon="gauge-high" href="/integrations/express">
+    Express.js integration guide
+  </Card>
+  
+  <Card title="Prisma" icon="database" href="/integrations/prisma">
+    Prisma integration guide
+  </Card>
+  
+  <Card title="OpenTelemetry" icon="chart-network" href="/opentelemetry">
+    OpenTelemetry setup
+  </Card>
+  
+  <Card title="Profiling" icon="chart-line" href="/profiling">
+    CPU profiling guide
+  </Card>
+</CardGroup>

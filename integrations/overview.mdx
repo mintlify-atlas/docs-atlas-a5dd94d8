@@ -1,0 +1,115 @@
+---
+title: 'Integrations Overview'
+description: 'Core integrations that enhance error tracking and performance monitoring in Sentry'
+---
+
+Integrations extend Sentry's functionality by adding automatic instrumentation, filtering, and data enrichment capabilities. The Sentry JavaScript SDK includes several core integrations that are enabled by default, as well as optional integrations for specific use cases.
+
+## Core Integrations
+
+These integrations are automatically enabled and provide essential functionality:
+
+<CardGroup cols={2}>
+  <Card title="Event Filters" icon="filter" href="/integrations/event-filters">
+    Filter out unwanted errors and transactions based on patterns
+  </Card>
+  <Card title="Linked Errors" icon="link" href="/integrations/linked-errors">
+    Capture error cause chains and aggregate errors
+  </Card>
+  <Card title="Dedupe" icon="copy" href="/integrations/dedupe">
+    Prevent duplicate error events from being sent
+  </Card>
+  <Card title="Request Data" icon="globe" href="/integrations/request-data">
+    Attach request context to error events
+  </Card>
+</CardGroup>
+
+## Integration Types
+
+### Event Processing
+
+Integrations can process events before they're sent to Sentry:
+
+- **Event Filters**: Filter events based on error messages, URLs, or transaction names
+- **Dedupe**: Remove duplicate events by comparing stacktraces and fingerprints
+- **Request Data**: Enrich events with HTTP request information
+
+### Error Enrichment
+
+- **Linked Errors**: Automatically capture error cause chains
+- **Extra Error Data**: Add additional context from error objects
+
+### Performance Monitoring
+
+- **AI Monitoring**: Track LLM API calls and responses
+- **Database**: Monitor database queries and operations
+- **Backend Services**: Instrument external service calls
+
+## How Integrations Work
+
+Integrations are registered during SDK initialization:
+
+```javascript
+import * as Sentry from '@sentry/node';
+
+Sentry.init({
+  dsn: 'your-dsn',
+  integrations: [
+    // Default integrations are automatically included
+    // Add custom integrations here
+    Sentry.postgresIntegration(),
+    Sentry.openAIIntegration(),
+  ],
+});
+```
+
+### Default Integrations
+
+The SDK includes these integrations by default:
+
+- `eventFiltersIntegration()`
+- `linkedErrorsIntegration()`
+- `dedupeIntegration()`
+- `requestDataIntegration()` (Node.js SDKs)
+
+### Disabling Default Integrations
+
+To disable a default integration:
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  integrations: integrations => {
+    return integrations.filter(integration => {
+      return integration.name !== 'Dedupe';
+    });
+  },
+});
+```
+
+## Configuration Options
+
+Most integrations accept configuration options:
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  integrations: [
+    Sentry.eventFiltersIntegration({
+      ignoreErrors: [/Custom.*Error/],
+      denyUrls: [/external-cdn\.com/],
+    }),
+  ],
+});
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="AI Monitoring" icon="brain" href="/integrations/ai/overview">
+    Monitor AI/LLM applications
+  </Card>
+  <Card title="Database Integrations" icon="database" href="/integrations/postgres">
+    Track database operations
+  </Card>
+</CardGroup>

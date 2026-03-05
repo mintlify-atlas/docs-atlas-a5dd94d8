@@ -1,0 +1,458 @@
+---
+title: "Breadcrumbs"
+description: "Track user actions and events leading up to errors"
+---
+
+Breadcrumbs are a trail of events that happened prior to an issue. They help you understand the context and sequence of actions that led to an error.
+
+## What are Breadcrumbs?
+
+Breadcrumbs are automatically captured by Sentry for common actions like:
+
+- Console logs
+- Network requests (fetch, XHR)
+- UI clicks and interactions
+- Navigation events
+- DOM mutations
+
+You can also manually add breadcrumbs to track custom events.
+
+## Adding Breadcrumbs
+
+### Basic Usage
+
+```javascript
+import * as Sentry from '@sentry/browser';
+
+Sentry.addBreadcrumb({
+  category: 'auth',
+  message: 'User logged in',
+  level: 'info'
+});
+```
+
+### With Additional Data
+
+```javascript
+Sentry.addBreadcrumb({
+  category: 'navigation',
+  message: 'Navigated to checkout',
+  level: 'info',
+  data: {
+    from: '/cart',
+    to: '/checkout',
+    items: 3,
+    total: 99.99
+  }
+});
+```
+
+### Breadcrumb Levels
+
+Breadcrumbs support different severity levels:
+
+```javascript
+// Available levels
+Sentry.addBreadcrumb({ message: 'Debug info', level: 'debug' });
+Sentry.addBreadcrumb({ message: 'General info', level: 'info' });
+Sentry.addBreadcrumb({ message: 'Warning', level: 'warning' });
+Sentry.addBreadcrumb({ message: 'Error occurred', level: 'error' });
+Sentry.addBreadcrumb({ message: 'Fatal error', level: 'fatal' });
+```
+
+<Note>
+By default, Sentry keeps the last 100 breadcrumbs. This limit can be configured using the `maxBreadcrumbs` option.
+</Note>
+
+## Breadcrumb Categories
+
+Organize breadcrumbs using categories:
+
+### User Actions
+
+```javascript
+Sentry.addBreadcrumb({
+  category: 'ui.click',
+  message: 'User clicked submit button',
+  data: {
+    button_id: 'submit-form',
+    form_id: 'checkout-form'
+  }
+});
+```
+
+### Navigation
+
+```javascript
+Sentry.addBreadcrumb({
+  category: 'navigation',
+  message: 'Page navigation',
+  data: {
+    from: '/products',
+    to: '/checkout',
+    method: 'push'
+  }
+});
+```
+
+### HTTP Requests
+
+```javascript
+Sentry.addBreadcrumb({
+  category: 'http',
+  type: 'http',
+  data: {
+    url: 'https://api.example.com/users',
+    method: 'POST',
+    status_code: 201,
+    duration: 145
+  }
+});
+```
+
+### Console Logs
+
+```javascript
+Sentry.addBreadcrumb({
+  category: 'console',
+  level: 'warning',
+  message: 'Payment validation warning',
+  data: {
+    logger: 'console',
+    extra: {
+      card_type: 'visa',
+      last_four: '1234'
+    }
+  }
+});
+```
+
+### State Changes
+
+```javascript
+Sentry.addBreadcrumb({
+  category: 'state',
+  message: 'Cart updated',
+  data: {
+    previous_items: 2,
+    new_items: 3,
+    action: 'add_item',
+    product_id: 'prod-123'
+  }
+});
+```
+
+## Breadcrumb Types
+
+Breadcrumbs can have specific types that affect how they're displayed:
+
+```javascript
+// Default type
+Sentry.addBreadcrumb({
+  type: 'default',
+  message: 'Something happened'
+});
+
+// HTTP request
+Sentry.addBreadcrumb({
+  type: 'http',
+  category: 'xhr',
+  data: { url: '/api/data', method: 'GET', status_code: 200 }
+});
+
+// Navigation
+Sentry.addBreadcrumb({
+  type: 'navigation',
+  category: 'navigation',
+  data: { from: '/home', to: '/profile' }
+});
+
+// User interaction
+Sentry.addBreadcrumb({
+  type: 'user',
+  category: 'ui.click',
+  message: 'Button clicked'
+});
+
+// Query (database, GraphQL, etc.)
+Sentry.addBreadcrumb({
+  type: 'query',
+  category: 'query',
+  message: 'Database query executed',
+  data: { query: 'SELECT * FROM users', duration: 23 }
+});
+```
+
+## Configuration
+
+### Maximum Breadcrumbs
+
+Control how many breadcrumbs are kept:
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  maxBreadcrumbs: 50 // Default is 100
+});
+```
+
+### Filtering Breadcrumbs
+
+Filter breadcrumbs before they're added:
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  beforeBreadcrumb(breadcrumb, hint) {
+    // Don't capture console.debug breadcrumbs
+    if (breadcrumb.category === 'console' && breadcrumb.level === 'debug') {
+      return null;
+    }
+    
+    // Filter out sensitive data
+    if (breadcrumb.data?.password) {
+      breadcrumb.data = { ...breadcrumb.data };
+      delete breadcrumb.data.password;
+    }
+    
+    return breadcrumb;
+  }
+});
+```
+
+<Warning>
+Returning `null` from `beforeBreadcrumb` will prevent the breadcrumb from being added.
+</Warning>
+
+## Practical Examples
+
+### E-commerce Flow
+
+```javascript
+// User views product
+Sentry.addBreadcrumb({
+  category: 'product',
+  message: 'Product viewed',
+  data: {
+    product_id: 'prod-123',
+    product_name: 'Awesome Widget',
+    price: 29.99
+  }
+});
+
+// User adds to cart
+Sentry.addBreadcrumb({
+  category: 'cart',
+  message: 'Item added to cart',
+  data: {
+    product_id: 'prod-123',
+    quantity: 2,
+    cart_total: 59.98
+  }
+});
+
+// User proceeds to checkout
+Sentry.addBreadcrumb({
+  category: 'checkout',
+  message: 'Checkout initiated',
+  data: {
+    items: 2,
+    subtotal: 59.98,
+    shipping: 5.99,
+    total: 65.97
+  }
+});
+
+// Payment processed
+Sentry.addBreadcrumb({
+  category: 'payment',
+  message: 'Payment processed',
+  level: 'info',
+  data: {
+    payment_method: 'credit_card',
+    amount: 65.97,
+    transaction_id: 'txn-abc123'
+  }
+});
+```
+
+### API Integration
+
+```javascript
+async function fetchUserData(userId) {
+  Sentry.addBreadcrumb({
+    category: 'api',
+    message: 'Fetching user data',
+    data: { user_id: userId }
+  });
+  
+  try {
+    const response = await fetch(`/api/users/${userId}`);
+    
+    Sentry.addBreadcrumb({
+      category: 'api',
+      message: 'User data received',
+      data: {
+        user_id: userId,
+        status: response.status,
+        ok: response.ok
+      }
+    });
+    
+    return await response.json();
+  } catch (error) {
+    Sentry.addBreadcrumb({
+      category: 'api',
+      message: 'Failed to fetch user data',
+      level: 'error',
+      data: {
+        user_id: userId,
+        error: error.message
+      }
+    });
+    
+    Sentry.captureException(error);
+    throw error;
+  }
+}
+```
+
+### Form Validation
+
+```javascript
+function validateForm(formData) {
+  Sentry.addBreadcrumb({
+    category: 'validation',
+    message: 'Form validation started',
+    data: { form_id: 'checkout-form' }
+  });
+  
+  const errors = [];
+  
+  if (!formData.email) {
+    errors.push('email');
+    Sentry.addBreadcrumb({
+      category: 'validation',
+      message: 'Email validation failed',
+      level: 'warning'
+    });
+  }
+  
+  if (!formData.cardNumber) {
+    errors.push('card_number');
+    Sentry.addBreadcrumb({
+      category: 'validation',
+      message: 'Card number validation failed',
+      level: 'warning'
+    });
+  }
+  
+  if (errors.length > 0) {
+    Sentry.addBreadcrumb({
+      category: 'validation',
+      message: 'Form validation failed',
+      level: 'error',
+      data: { failed_fields: errors }
+    });
+    return false;
+  }
+  
+  Sentry.addBreadcrumb({
+    category: 'validation',
+    message: 'Form validation passed',
+    level: 'info'
+  });
+  
+  return true;
+}
+```
+
+## Working with Breadcrumbs in Scopes
+
+### Access Breadcrumbs
+
+```javascript
+import { getCurrentScope } from '@sentry/browser';
+
+const scope = getCurrentScope();
+const scopeData = scope.getScopeData();
+console.log(scopeData.breadcrumbs);
+```
+
+### Get Last Breadcrumb
+
+```javascript
+import { getCurrentScope } from '@sentry/browser';
+
+const scope = getCurrentScope();
+const lastBreadcrumb = scope.getLastBreadcrumb();
+console.log(lastBreadcrumb);
+```
+
+### Clear Breadcrumbs
+
+```javascript
+import { getCurrentScope } from '@sentry/browser';
+
+const scope = getCurrentScope();
+scope.clearBreadcrumbs();
+```
+
+<Tip>
+Clear breadcrumbs when starting a new logical operation or flow to keep the trail focused and relevant.
+</Tip>
+
+## Automatic Breadcrumbs
+
+Sentry automatically captures breadcrumbs for:
+
+### Console Logs
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  integrations: [
+    Sentry.captureConsoleIntegration({
+      levels: ['log', 'info', 'warn', 'error', 'assert']
+    })
+  ]
+});
+```
+
+### HTTP Requests
+
+Automatically captured by the default integrations.
+
+### UI Events
+
+Automatically captured for clicks and other interactions.
+
+## Best Practices
+
+1. **Be descriptive**: Use clear, descriptive messages that explain what happened
+2. **Use categories**: Organize breadcrumbs with consistent category names
+3. **Add relevant data**: Include data that helps understand the context
+4. **Avoid sensitive data**: Don't log passwords, tokens, or PII
+5. **Keep them focused**: Only add breadcrumbs for significant events
+6. **Use appropriate levels**: Match the breadcrumb level to the event severity
+
+<Note>
+Breadcrumbs are automatically included with error events, providing a timeline of what led to the error.
+</Note>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Scopes" icon="layer-group" href="/core/scopes">
+    Learn about managing scope data
+  </Card>
+  <Card title="Context" icon="info-circle" href="/core/context">
+    Add structured context to events
+  </Card>
+  <Card title="Error Monitoring" icon="bug" href="/core/error-monitoring">
+    Capture errors with breadcrumb trails
+  </Card>
+  <Card title="Performance" icon="gauge" href="/core/performance">
+    Track performance with breadcrumbs
+  </Card>
+</CardGroup>

@@ -1,0 +1,528 @@
+---
+title: 'MCP Server Integration'
+description: 'Monitor Model Context Protocol servers with automatic instrumentation'
+---
+
+The MCP Server integration provides comprehensive monitoring for [Model Context Protocol](https://modelcontextprotocol.io/) servers by automatically instrumenting transport methods and handler functions.
+
+<Note>
+  This integration wraps MCP Server instances from the `@modelcontextprotocol/sdk` package (version ^1.9.0).
+</Note>
+
+## Installation
+
+```javascript
+import * as Sentry from '@sentry/node';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+
+Sentry.init({
+  dsn: 'your-dsn',
+});
+
+const server = new McpServer({
+  name: 'my-mcp-server',
+  version: '1.0.0',
+});
+
+// Wrap server with Sentry instrumentation
+const instrumentedServer = Sentry.wrapMcpServerWithSentry(server);
+
+const transport = new StreamableHTTPServerTransport();
+await instrumentedServer.connect(transport);
+```
+
+## Basic Usage
+
+Once wrapped, all MCP operations are automatically tracked:
+
+```javascript
+import * as Sentry from '@sentry/node';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+
+const server = Sentry.wrapMcpServerWithSentry(
+  new McpServer({ name: 'my-server', version: '1.0.0' })
+);
+
+// Register a tool
+server.tool('calculate', 'Perform calculations', {
+  expression: {
+    type: 'string',
+    description: 'Math expression to evaluate',
+  },
+}, async ({ expression }) => {
+  const result = eval(expression);
+  return { content: [{ type: 'text', text: String(result) }] };
+});
+// Tool calls automatically tracked
+
+// Register a resource
+server.resource('file://*', async ({ uri }) => {
+  const content = await fs.readFile(uri.replace('file://', ''), 'utf-8');
+  return { contents: [{ uri, text: content }] };
+});
+// Resource access automatically tracked
+
+// Register a prompt
+server.prompt('greeting', 'Generate a greeting', async ({ name }) => {
+  return {
+    messages: [{
+      role: 'user',
+      content: { type: 'text', text: `Hello, ${name}!` },
+    }],
+  };
+});
+// Prompt generation automatically tracked
+```
+
+## Configuration
+
+### Default Behavior
+
+By default, inputs and outputs are **only captured if `sendDefaultPii` is enabled**:
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  sendDefaultPii: false, // Default: no inputs/outputs
+});
+
+const server = Sentry.wrapMcpServerWithSentry(
+  new McpServer({ name: 'my-server', version: '1.0.0' })
+);
+```
+
+### Explicit Control
+
+Override the default behavior:
+
+```javascript
+const server = Sentry.wrapMcpServerWithSentry(
+  new McpServer({ name: 'my-server', version: '1.0.0' }),
+  {
+    recordInputs: true,   // Always capture inputs
+    recordOutputs: false, // Never capture outputs
+  }
+);
+```
+
+## Integration Options
+
+<ParamField path="recordInputs" type="boolean" default="sendDefaultPii">
+  Capture tool/resource/prompt inputs
+</ParamField>
+
+<ParamField path="recordOutputs" type="boolean" default="sendDefaultPii">
+  Capture handler outputs and responses
+</ParamField>
+
+## What Gets Instrumented
+
+The integration automatically wraps:
+
+### Transport Methods
+
+- **`transport.send()`**: Outgoing messages
+- **`transport.onMessage()`**: Incoming message handlers
+- **`transport.onClose()`**: Connection close handlers
+- **`transport.onError()`**: Error handlers
+
+### Handler Functions
+
+- **Tool Handlers**: Functions registered via `server.tool()`
+- **Resource Handlers**: Functions registered via `server.resource()`
+- **Prompt Handlers**: Functions registered via `server.prompt()`
+
+### Captured Data
+
+- Method names and types
+- Request/response payloads (when recording enabled)
+- Execution times
+- Errors and exceptions
+- Transport correlation IDs
+
+## Practical Examples
+
+### Simple MCP Server
+
+```javascript
+import * as Sentry from '@sentry/node';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+
+Sentry.init({
+  dsn: 'your-dsn',
+  sendDefaultPii: true, // Enable input/output capture
+});
+
+const server = Sentry.wrapMcpServerWithSentry(
+  new McpServer({
+    name: 'calculator-server',
+    version: '1.0.0',
+  })
+);
+
+// Register calculator tool
+server.tool(
+  'calculate',
+  'Perform mathematical calculations',
+  {
+    expression: {
+      type: 'string',
+      description: 'Mathematical expression',
+    },
+  },
+  async ({ expression }) => {
+    try {
+      const result = eval(expression);
+      return {
+        content: [{
+          type: 'text',
+          text: `Result: ${result}`,
+        }],
+      };
+    } catch (error) {
+      // Error automatically captured by Sentry
+      throw new Error(`Invalid expression: ${expression}`);
+    }
+  }
+);
+
+const transport = new StreamableHTTPServerTransport();
+await server.connect(transport);
+```
+
+### File System Resource Server
+
+```javascript
+import fs from 'fs/promises';
+import path from 'path';
+
+const server = Sentry.wrapMcpServerWithSentry(
+  new McpServer({ name: 'fs-server', version: '1.0.0' })
+);
+
+// Read file resource
+server.resource(
+  'file://*',
+  async ({ uri }) => {
+    const filePath = uri.replace('file://', '');
+    
+    try {
+      const content = await fs.readFile(filePath, 'utf-8');
+      return {
+        contents: [{
+          uri,
+          mimeType: 'text/plain',
+          text: content,
+        }],
+      };
+    } catch (error) {
+      // Error captured with file path context
+      throw new Error(`Failed to read file: ${filePath}`);
+    }
+  }
+);
+
+// List directory resource
+server.resource(
+  'dir://*',
+  async ({ uri }) => {
+    const dirPath = uri.replace('dir://', '');
+    const files = await fs.readdir(dirPath);
+    
+    return {
+      contents: files.map(file => ({
+        uri: `file://${path.join(dirPath, file)}`,
+        name: file,
+      })),
+    };
+  }
+);
+```
+
+### Prompt Template Server
+
+```javascript
+const server = Sentry.wrapMcpServerWithSentry(
+  new McpServer({ name: 'prompts-server', version: '1.0.0' })
+);
+
+// Code review prompt
+server.prompt(
+  'code_review',
+  'Generate code review prompt',
+  {
+    code: { type: 'string', description: 'Code to review' },
+    language: { type: 'string', description: 'Programming language' },
+  },
+  async ({ code, language }) => {
+    return {
+      messages: [
+        {
+          role: 'system',
+          content: {
+            type: 'text',
+            text: `You are an expert ${language} developer. Review the following code for best practices, bugs, and improvements.`,
+          },
+        },
+        {
+          role: 'user',
+          content: {
+            type: 'text',
+            text: `\`\`\`${language}\n${code}\n\`\`\``,
+          },
+        },
+      ],
+    };
+  }
+);
+
+// Bug analysis prompt
+server.prompt(
+  'analyze_bug',
+  'Generate bug analysis prompt',
+  {
+    error: { type: 'string', description: 'Error message' },
+    stacktrace: { type: 'string', description: 'Stack trace' },
+  },
+  async ({ error, stacktrace }) => {
+    return {
+      messages: [
+        {
+          role: 'user',
+          content: {
+            type: 'text',
+            text: `Analyze this error and suggest fixes:\n\nError: ${error}\n\nStack trace:\n${stacktrace}`,
+          },
+        },
+      ],
+    };
+  }
+);
+```
+
+### Database Query Tool
+
+```javascript
+import { Client } from 'pg';
+
+const dbClient = new Client({
+  connectionString: process.env.DATABASE_URL,
+});
+await dbClient.connect();
+
+const server = Sentry.wrapMcpServerWithSentry(
+  new McpServer({ name: 'db-server', version: '1.0.0' }),
+  {
+    recordInputs: false,  // Don't capture queries (may contain sensitive data)
+    recordOutputs: false, // Don't capture results
+  }
+);
+
+server.tool(
+  'query_database',
+  'Execute database query',
+  {
+    sql: { type: 'string', description: 'SQL query' },
+  },
+  async ({ sql }) => {
+    try {
+      const result = await dbClient.query(sql);
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify(result.rows, null, 2),
+        }],
+      };
+    } catch (error) {
+      // Database errors captured with context
+      Sentry.captureException(error, {
+        contexts: {
+          database: {
+            query_length: sql.length,
+          },
+        },
+      });
+      throw error;
+    }
+  }
+);
+```
+
+## Error Handling
+
+Errors in handlers are automatically captured:
+
+```javascript
+server.tool('risky_operation', 'May fail', {}, async () => {
+  throw new Error('Operation failed');
+  // Error automatically captured with:
+  // - Handler name: 'risky_operation'
+  // - Method type: 'tool'
+  // - Stack trace
+  // - MCP context
+});
+```
+
+### Custom Error Context
+
+```javascript
+server.tool('api_call', 'Call external API', {
+  endpoint: { type: 'string' },
+}, async ({ endpoint }) => {
+  try {
+    const response = await fetch(endpoint);
+    return { content: [{ type: 'text', text: await response.text() }] };
+  } catch (error) {
+    Sentry.captureException(error, {
+      contexts: {
+        api: {
+          endpoint,
+          timestamp: new Date().toISOString(),
+        },
+      },
+    });
+    throw error;
+  }
+});
+```
+
+## Performance Monitoring
+
+View MCP operations in Sentry:
+
+```
+Transaction: MCP Request
+├─ mcp.tool.calculate
+│  └─ Duration: 15ms
+├─ mcp.resource.file://data.txt
+│  └─ Duration: 45ms
+├─ mcp.prompt.code_review
+│  └─ Duration: 8ms
+└─ Total: 150ms
+```
+
+## Span Attributes
+
+Captured span attributes include:
+
+```javascript
+{
+  'mcp.handler.type': 'tool',
+  'mcp.handler.name': 'calculate',
+  'mcp.input': { expression: '2+2' },    // If recordInputs: true
+  'mcp.output': { result: '4' },          // If recordOutputs: true
+  'mcp.transport.type': 'http',
+  'mcp.server.name': 'my-server',
+  'mcp.server.version': '1.0.0',
+}
+```
+
+## Source Code
+
+The MCP Server integration is implemented in:
+
+`packages/core/src/integrations/mcp-server/index.ts:45`
+
+## Best Practices
+
+<Tip>
+  Be careful about capturing inputs/outputs that may contain sensitive user data.
+</Tip>
+
+### 1. Secure Sensitive Data
+
+```javascript
+const server = Sentry.wrapMcpServerWithSentry(
+  new McpServer({ name: 'secure-server', version: '1.0.0' }),
+  {
+    recordInputs: false,  // Don't capture potentially sensitive inputs
+    recordOutputs: false, // Don't capture outputs
+  }
+);
+```
+
+### 2. Add Custom Context
+
+```javascript
+server.tool('process_data', 'Process data', {}, async (args) => {
+  return await Sentry.startSpan(
+    {
+      name: 'Process Data',
+      attributes: {
+        'data.size': JSON.stringify(args).length,
+        'data.type': typeof args,
+      },
+    },
+    async () => {
+      // Processing logic
+      return { content: [] };
+    }
+  );
+});
+```
+
+### 3. Handle Errors Gracefully
+
+```javascript
+server.tool('safe_operation', 'Safe operation', {}, async (args) => {
+  try {
+    // Operation logic
+    return { content: [{ type: 'text', text: 'Success' }] };
+  } catch (error) {
+    Sentry.captureException(error);
+    return {
+      content: [{
+        type: 'text',
+        text: 'Operation failed, but error was logged',
+      }],
+      isError: true,
+    };
+  }
+});
+```
+
+## Troubleshooting
+
+### Server Not Instrumented
+
+Ensure you're wrapping the server before calling `connect()`:
+
+```javascript
+// Correct order:
+const server = new McpServer({...});
+const wrapped = Sentry.wrapMcpServerWithSentry(server);
+await wrapped.connect(transport);
+
+// Wrong:
+await server.connect(transport);
+const wrapped = Sentry.wrapMcpServerWithSentry(server); // Too late
+```
+
+### Double Wrapping
+
+The integration prevents double-wrapping automatically:
+
+```javascript
+const wrapped1 = Sentry.wrapMcpServerWithSentry(server);
+const wrapped2 = Sentry.wrapMcpServerWithSentry(wrapped1);
+// wrapped2 === wrapped1 (same instance, not wrapped again)
+```
+
+### Missing Spans
+
+Ensure tracing is enabled:
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  tracesSampleRate: 1.0,
+});
+```
+
+## Related
+
+- [AI Monitoring Overview](/integrations/ai/overview)
+- [Model Context Protocol](https://modelcontextprotocol.io/)
+- [OpenAI Integration](/integrations/ai/openai)

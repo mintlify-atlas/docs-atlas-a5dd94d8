@@ -1,0 +1,506 @@
+---
+title: Astro SDK
+description: Error monitoring and performance tracking for Astro applications
+---
+
+The Sentry Astro SDK provides error monitoring and performance tracking for Astro applications with support for both client and server-side rendering.
+
+<Note>
+The Astro SDK is currently in **Beta**. Features and APIs may change. Please report any issues on [GitHub](https://github.com/getsentry/sentry-javascript/issues).
+</Note>
+
+## Installation
+
+<Steps>
+  <Step title="Install with Astro CLI">
+    The easiest way to add Sentry to your Astro project:
+
+    ```bash
+    npx astro add @sentry/astro
+    ```
+
+    This will:
+    - Install the `@sentry/astro` package
+    - Add the integration to `astro.config.mjs`
+    - Set up automatic instrumentation
+  </Step>
+
+  <Step title="Manual Installation">
+    <CodeGroup>
+    ```bash npm
+    npm install @sentry/astro
+    ```
+
+    ```bash yarn
+    yarn add @sentry/astro
+    ```
+
+    ```bash pnpm
+    pnpm add @sentry/astro
+    ```
+    </CodeGroup>
+  </Step>
+</Steps>
+
+## Version Compatibility
+
+- **Astro 3.5.2+**: Automatic server instrumentation
+- **Astro 3.0+**: Manual middleware setup required
+- Works with SSR and static site generation
+
+## Basic Setup
+
+### Astro Configuration
+
+Add Sentry to your `astro.config.mjs`:
+
+```javascript
+import { defineConfig } from 'astro/config';
+import sentry from '@sentry/astro';
+
+export default defineConfig({
+  integrations: [
+    sentry({
+      dsn: 'YOUR_DSN_HERE',
+      sourceMapsUploadOptions: {
+        project: 'your-project',
+        authToken: process.env.SENTRY_AUTH_TOKEN,
+      },
+    }),
+  ],
+  output: 'server', // or 'hybrid'
+});
+```
+
+### Client Initialization
+
+Create `src/sentry.client.config.ts`:
+
+```typescript
+import * as Sentry from '@sentry/astro';
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  
+  // Performance Monitoring
+  tracesSampleRate: 1.0,
+  
+  // Session Replay
+  replaysSessionSampleRate: 0.1,
+  replaysOnErrorSampleRate: 1.0,
+  
+  integrations: [
+    Sentry.replayIntegration(),
+  ],
+});
+```
+
+### Server Initialization
+
+Create `src/sentry.server.config.ts`:
+
+```typescript
+import * as Sentry from '@sentry/astro';
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  tracesSampleRate: 1.0,
+});
+```
+
+## Server-Side Instrumentation
+
+### Automatic (Astro 3.5.2+)
+
+For Astro 3.5.2+, server instrumentation is automatic. No middleware setup needed.
+
+### Manual (Astro versions below 3.5.2)
+
+For older versions, create `src/middleware.ts`:
+
+```typescript
+import { sequence } from 'astro:middleware';
+import * as Sentry from '@sentry/astro';
+
+export const onRequest = sequence(
+  Sentry.handleRequest(),
+  // Add your other middleware here
+);
+```
+
+### Disable Automatic Instrumentation
+
+If you want to opt out:
+
+```javascript
+// astro.config.mjs
+export default defineConfig({
+  integrations: [
+    sentry({
+      dsn: 'YOUR_DSN_HERE',
+      autoInstrumentation: {
+        requestHandler: false,
+      },
+    }),
+  ],
+});
+```
+
+## Error Handling
+
+### API Routes
+
+```typescript
+// src/pages/api/users.ts
+import type { APIRoute } from 'astro';
+import * as Sentry from '@sentry/astro';
+
+export const GET: APIRoute = async ({ params }) => {
+  try {
+    const users = await fetchUsers();
+    return new Response(
+      JSON.stringify(users),
+      { status: 200 }
+    );
+  } catch (error) {
+    Sentry.captureException(error);
+    return new Response(
+      JSON.stringify({ error: 'Internal Server Error' }),
+      { status: 500 }
+    );
+  }
+};
+```
+
+### Server-Side Rendering
+
+```astro
+---
+// src/pages/user/[id].astro
+import * as Sentry from '@sentry/astro';
+
+const { id } = Astro.params;
+
+let user;
+try {
+  user = await fetchUser(id);
+} catch (error) {
+  Sentry.captureException(error);
+  return Astro.redirect('/404');
+}
+---
+
+<html>
+  <body>
+    <h1>{user.name}</h1>
+  </body>
+</html>
+```
+
+### Client-Side Components
+
+```astro
+---
+// src/components/Button.astro
+---
+
+<button id="my-button">Click me</button>
+
+<script>
+  import * as Sentry from '@sentry/astro';
+  
+  document.getElementById('my-button')?.addEventListener('click', async () => {
+    try {
+      await riskyOperation();
+    } catch (error) {
+      Sentry.captureException(error);
+    }
+  });
+</script>
+```
+
+## Performance Monitoring
+
+### Custom Spans
+
+```typescript
+import * as Sentry from '@sentry/astro';
+
+export async function fetchData() {
+  return await Sentry.startSpan(
+    {
+      name: 'fetch-data',
+      op: 'function',
+    },
+    async () => {
+      const response = await fetch('/api/data');
+      return response.json();
+    },
+  );
+}
+```
+
+### Database Queries
+
+```typescript
+import * as Sentry from '@sentry/astro';
+import { db } from './db';
+
+export async function getUser(id: string) {
+  return await Sentry.startSpan(
+    {
+      name: 'db.query.user',
+      op: 'db.query',
+      attributes: {
+        'db.system': 'postgresql',
+        'db.operation': 'SELECT',
+      },
+    },
+    async () => {
+      return await db.user.findUnique({ where: { id } });
+    },
+  );
+}
+```
+
+## Context and User Information
+
+### Setting Context in API Routes
+
+```typescript
+// src/pages/api/protected.ts
+import type { APIRoute } from 'astro';
+import * as Sentry from '@sentry/astro';
+
+export const GET: APIRoute = async ({ request, cookies }) => {
+  const userId = cookies.get('user_id')?.value;
+  
+  if (userId) {
+    Sentry.setUser({ id: userId });
+  }
+  
+  Sentry.setContext('request', {
+    method: request.method,
+    url: request.url,
+  });
+  
+  // Your route logic
+};
+```
+
+### Client-Side User Context
+
+```astro
+---
+// src/layouts/Layout.astro
+const user = Astro.locals.user;
+---
+
+<html>
+  <head>
+    <script define:vars={{ user }}>
+      if (user) {
+        import('@sentry/astro').then(Sentry => {
+          Sentry.setUser({
+            id: user.id,
+            email: user.email,
+          });
+        });
+      }
+    </script>
+  </head>
+  <body>
+    <slot />
+  </body>
+</html>
+```
+
+## Source Maps Upload
+
+### Configuration
+
+```javascript
+// astro.config.mjs
+import { defineConfig } from 'astro/config';
+import sentry from '@sentry/astro';
+
+export default defineConfig({
+  integrations: [
+    sentry({
+      dsn: 'YOUR_DSN_HERE',
+      sourceMapsUploadOptions: {
+        project: 'your-project',
+        authToken: process.env.SENTRY_AUTH_TOKEN,
+        org: 'your-org',
+      },
+    }),
+  ],
+});
+```
+
+### Environment Variables
+
+Create a `.env` file:
+
+```bash
+# Required
+SENTRY_DSN=your-dsn-here
+
+# For source maps
+SENTRY_AUTH_TOKEN=your-auth-token
+
+# Optional
+SENTRY_ENVIRONMENT=production
+SENTRY_RELEASE=1.0.0
+```
+
+## Framework Integrations
+
+### React Integration
+
+```astro
+---
+// src/components/ReactComponent.tsx
+import { useState } from 'react';
+import * as Sentry from '@sentry/astro';
+
+export default function Counter() {
+  const [count, setCount] = useState(0);
+  
+  const handleClick = () => {
+    try {
+      // Your logic
+      setCount(count + 1);
+    } catch (error) {
+      Sentry.captureException(error);
+    }
+  };
+  
+  return <button onClick={handleClick}>Count: {count}</button>;
+}
+---
+
+<html>
+  <body>
+    <Counter client:load />
+  </body>
+</html>
+```
+
+### Vue Integration
+
+```vue
+<!-- src/components/VueComponent.vue -->
+<script setup lang="ts">
+import * as Sentry from '@sentry/astro';
+import { ref } from 'vue';
+
+const count = ref(0);
+
+const handleClick = () => {
+  try {
+    count.value++;
+  } catch (error) {
+    Sentry.captureException(error);
+  }
+};
+</script>
+
+<template>
+  <button @click="handleClick">Count: {{ count }}</button>
+</template>
+```
+
+## Deployment
+
+<Tabs>
+  <Tab title="Vercel">
+    Add environment variables in Vercel:
+    - `SENTRY_DSN`
+    - `SENTRY_AUTH_TOKEN`
+  </Tab>
+
+  <Tab title="Netlify">
+    Add to `netlify.toml`:
+    ```toml
+    [build.environment]
+      SENTRY_DSN = "your-dsn-here"
+    ```
+  </Tab>
+
+  <Tab title="Cloudflare Pages">
+    Configure environment variables in Cloudflare dashboard.
+  </Tab>
+
+  <Tab title="Node.js Adapter">
+    ```javascript
+    // astro.config.mjs
+    import node from '@astrojs/node';
+    
+    export default defineConfig({
+      output: 'server',
+      adapter: node({
+        mode: 'standalone',
+      }),
+    });
+    ```
+  </Tab>
+</Tabs>
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="SSR Configuration" icon="server">
+    Configure both client and server for full coverage.
+  </Card>
+  
+  <Card title="Middleware Order" icon="list">
+    Place Sentry.handleRequest() first in middleware sequence.
+  </Card>
+  
+  <Card title="Source Maps" icon="map">
+    Always upload source maps for production deployments.
+  </Card>
+  
+  <Card title="Error Boundaries" icon="shield">
+    Use try-catch in API routes and page components.
+  </Card>
+</CardGroup>
+
+## Troubleshooting
+
+<Accordion title="Middleware Not Working">
+  For Astro versions below 3.5.2:
+  
+  1. Ensure `src/middleware.ts` exists
+  2. Verify `Sentry.handleRequest()` is called
+  3. Check that output is 'server' or 'hybrid'
+</Accordion>
+
+<Accordion title="Source Maps Not Uploaded">
+  Verify:
+  
+  1. `SENTRY_AUTH_TOKEN` is set
+  2. `sourceMapsUploadOptions` is configured
+  3. Build completes successfully
+</Accordion>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="API Routes" icon="route" href="/api-routes">
+    Monitor API endpoint performance
+  </Card>
+  
+  <Card title="SSR Pages" icon="file" href="/ssr-pages">
+    Track server-rendered pages
+  </Card>
+  
+  <Card title="Session Replay" icon="video" href="/session-replay">
+    Debug with session recordings
+  </Card>
+  
+  <Card title="Adapters" icon="plug" href="/adapters">
+    Configure for your deployment platform
+  </Card>
+</CardGroup>

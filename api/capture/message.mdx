@@ -1,0 +1,378 @@
+---
+title: "captureMessage"
+description: "Capture and send message events to Sentry"
+---
+
+The `captureMessage` function captures a message string and sends it to Sentry as an event.
+
+## Function Signature
+
+```typescript
+export function captureMessage(
+  message: string,
+  captureContext?: CaptureContext | SeverityLevel
+): string
+```
+
+## Parameters
+
+<ParamField path="message" type="string" required>
+  The message string to capture.
+</ParamField>
+
+<ParamField path="captureContext" type="CaptureContext | SeverityLevel">
+  Either a severity level string or additional context. Can be:
+  - A SeverityLevel: `'fatal'`, `'error'`, `'warning'`, `'info'`, `'debug'`, or `'log'`
+  - A Scope object
+  - A partial ScopeContext object
+  - A callback function receiving the current scope
+</ParamField>
+
+## Returns
+
+<ResponseField name="eventId" type="string">
+  The unique ID of the captured event.
+</ResponseField>
+
+## Basic Usage
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+// Simple message
+Sentry.captureMessage('User login successful');
+
+// With severity level
+Sentry.captureMessage('Database connection slow', 'warning');
+```
+
+## Severity Levels
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+// Fatal - critical errors
+Sentry.captureMessage('System crash imminent', 'fatal');
+
+// Error - errors that need attention
+Sentry.captureMessage('Payment processing failed', 'error');
+
+// Warning - potential issues
+Sentry.captureMessage('API rate limit approaching', 'warning');
+
+// Info - informational messages (default)
+Sentry.captureMessage('User completed onboarding', 'info');
+
+// Debug - debugging information
+Sentry.captureMessage('Cache hit rate: 95%', 'debug');
+
+// Log - general logging
+Sentry.captureMessage('Application started', 'log');
+```
+
+## With Context
+
+### Using Object Context
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+Sentry.captureMessage('Order processed successfully', {
+  level: 'info',
+  tags: {
+    order_type: 'subscription',
+    payment_method: 'stripe'
+  },
+  extra: {
+    orderId: '12345',
+    amount: 99.99,
+    currency: 'USD'
+  },
+  user: {
+    id: 'user-123',
+    email: 'customer@example.com'
+  }
+});
+```
+
+### Using Scope Callback
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+Sentry.captureMessage('Cache cleared', (scope) => {
+  scope.setLevel('info');
+  scope.setTag('cache_type', 'redis');
+  scope.setContext('performance', {
+    duration: 245,
+    entries_cleared: 1500
+  });
+  return scope;
+});
+```
+
+## Advanced Examples
+
+### API Monitoring
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+function logApiCall(endpoint: string, duration: number, statusCode: number) {
+  const level = statusCode >= 500 ? 'error' : 
+                statusCode >= 400 ? 'warning' : 'info';
+  
+  Sentry.captureMessage(`API ${endpoint} - ${statusCode}`, {
+    level,
+    tags: {
+      endpoint,
+      status_code: statusCode,
+      response_time: duration > 1000 ? 'slow' : 'fast'
+    },
+    extra: {
+      duration_ms: duration,
+      timestamp: Date.now()
+    }
+  });
+}
+
+logApiCall('/api/users', 850, 200);
+```
+
+### Feature Flag Tracking
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+function trackFeatureFlag(flagName: string, enabled: boolean, userId: string) {
+  Sentry.captureMessage(`Feature flag: ${flagName}`, {
+    level: 'info',
+    tags: {
+      feature_flag: flagName,
+      flag_state: enabled ? 'enabled' : 'disabled'
+    },
+    user: {
+      id: userId
+    },
+    contexts: {
+      feature_flags: {
+        [flagName]: enabled
+      }
+    }
+  });
+}
+
+trackFeatureFlag('new-checkout', true, 'user-456');
+```
+
+### Business Metrics
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+function trackBusinessEvent(
+  eventName: string,
+  metadata: Record<string, any>
+) {
+  Sentry.captureMessage(`Business Event: ${eventName}`, {
+    level: 'info',
+    tags: {
+      event_type: 'business',
+      event_name: eventName
+    },
+    extra: metadata
+  });
+}
+
+trackBusinessEvent('subscription_upgrade', {
+  from_plan: 'basic',
+  to_plan: 'premium',
+  revenue: 29.99,
+  userId: 'user-789'
+});
+```
+
+## Implementation Details
+
+From `packages/core/src/client.ts`:
+
+```typescript
+public captureMessage(
+  message: ParameterizedString,
+  level?: SeverityLevel,
+  hint?: EventHint,
+  currentScope?: Scope,
+): string {
+  const hintWithEventId = {
+    event_id: uuid4(),
+    ...hint,
+  };
+
+  const eventMessage = isParameterizedString(message) 
+    ? message 
+    : String(message);
+  
+  const isMessage = isPrimitive(message);
+  const promisedEvent = isMessage
+    ? this.eventFromMessage(eventMessage, level, hintWithEventId)
+    : this.eventFromException(message, hintWithEventId);
+
+  this._process(
+    () => promisedEvent.then(event => 
+      this._captureEvent(event, hintWithEventId, currentScope)
+    ),
+    isMessage ? 'unknown' : 'error',
+  );
+
+  return hintWithEventId.event_id;
+}
+```
+
+## Message vs Exception
+
+Use `captureMessage` for:
+- Informational logging
+- Business events
+- Feature usage tracking
+- Performance milestones
+- State changes
+
+Use `captureException` for:
+- Caught exceptions
+- Error conditions
+- Failed operations
+- Unexpected states
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+// Good use of captureMessage
+Sentry.captureMessage('User completed tutorial', 'info');
+Sentry.captureMessage('API response time exceeded 2s', 'warning');
+
+// Should use captureException instead
+try {
+  riskyOperation();
+} catch (error) {
+  // Use captureException for errors
+  Sentry.captureException(error);
+}
+```
+
+## Filtering Messages
+
+Use `beforeSend` to filter or modify messages:
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+Sentry.init({
+  dsn: 'your-dsn',
+  beforeSend(event, hint) {
+    // Don't send debug messages in production
+    if (event.level === 'debug' && process.env.NODE_ENV === 'production') {
+      return null;
+    }
+    
+    // Filter by message content
+    if (event.message?.includes('healthcheck')) {
+      return null;
+    }
+    
+    return event;
+  }
+});
+```
+
+## Sampling Messages
+
+Control how many messages are sent:
+
+```typescript
+import * as Sentry from '@sentry/node';
+
+Sentry.init({
+  dsn: 'your-dsn',
+  // Sample 10% of events
+  sampleRate: 0.1,
+  
+  beforeSend(event) {
+    // Only sample info messages
+    if (event.level === 'info') {
+      if (Math.random() > 0.1) {
+        return null;
+      }
+    }
+    return event;
+  }
+});
+```
+
+## Best Practices
+
+### 1. Use Descriptive Messages
+
+```typescript
+// Bad
+Sentry.captureMessage('Error');
+
+// Good
+Sentry.captureMessage('Failed to sync user data to CRM');
+```
+
+### 2. Include Relevant Context
+
+```typescript
+// Bad
+Sentry.captureMessage('Order failed');
+
+// Good
+Sentry.captureMessage('Order payment failed', {
+  level: 'error',
+  tags: { order_id: '12345' },
+  extra: { 
+    reason: 'card_declined',
+    amount: 99.99 
+  }
+});
+```
+
+### 3. Use Appropriate Levels
+
+```typescript
+// User actions - info
+Sentry.captureMessage('User logged in', 'info');
+
+// Warnings - warning
+Sentry.captureMessage('API retry limit reached', 'warning');
+
+// Errors - error
+Sentry.captureMessage('Payment processor unavailable', 'error');
+```
+
+### 4. Avoid High-Volume Messages
+
+```typescript
+// Bad - will create too many events
+app.use((req, res, next) => {
+  Sentry.captureMessage(`Request: ${req.path}`);
+  next();
+});
+
+// Good - use breadcrumbs for high-volume data
+app.use((req, res, next) => {
+  Sentry.addBreadcrumb({
+    category: 'http',
+    message: `${req.method} ${req.path}`,
+    level: 'info'
+  });
+  next();
+});
+```
+
+## Related
+
+- [captureException](/api/capture/exception)
+- [captureEvent](/api/capture/event)
+- [addBreadcrumb](/api/capture/breadcrumb)
+- [Scope](/api/core/scope)

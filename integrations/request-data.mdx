@@ -1,0 +1,411 @@
+---
+title: 'Request Data Integration'
+description: 'Attach HTTP request context to error events'
+---
+
+The Request Data integration automatically attaches HTTP request information to error events in Node.js and server-side environments.
+
+## Installation
+
+This integration is **enabled by default** in Node.js SDKs.
+
+```javascript
+import * as Sentry from '@sentry/node';
+
+Sentry.init({
+  dsn: 'your-dsn',
+  // requestDataIntegration is included by default
+});
+```
+
+## What Data Is Captured
+
+By default, the integration captures:
+
+- **HTTP Method**: GET, POST, PUT, etc.
+- **URL**: Request URL
+- **Headers**: All HTTP headers
+- **Cookies**: Request cookies
+- **Query String**: URL parameters
+- **Request Body**: POST/PUT data
+- **IP Address**: Client IP (requires `sendDefaultPii: true`)
+
+## Configuration
+
+### Default Configuration
+
+All data except IP addresses is captured by default:
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  integrations: [
+    Sentry.requestDataIntegration({
+      include: {
+        cookies: true,
+        data: true,
+        headers: true,
+        query_string: true,
+        url: true,
+        ip: false, // Requires sendDefaultPii: true
+      },
+    }),
+  ],
+});
+```
+
+### Selective Data Capture
+
+Control which data is included:
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  integrations: [
+    Sentry.requestDataIntegration({
+      include: {
+        url: true,
+        headers: true,
+        query_string: false, // Don't include query params
+        data: false,         // Don't include body
+        cookies: false,      // Don't include cookies
+      },
+    }),
+  ],
+});
+```
+
+### Capturing IP Addresses
+
+IP addresses are only captured when `sendDefaultPii` is enabled:
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  sendDefaultPii: true, // Required for IP capture
+  integrations: [
+    Sentry.requestDataIntegration({
+      include: {
+        ip: true,
+      },
+    }),
+  ],
+});
+```
+
+## Configuration Options
+
+<ParamField path="include" type="object">
+  Controls what data is captured from requests
+  
+  <Expandable title="properties">
+    <ParamField path="url" type="boolean" default="true">
+      Include request URL
+    </ParamField>
+    
+    <ParamField path="headers" type="boolean" default="true">
+      Include HTTP headers
+    </ParamField>
+    
+    <ParamField path="cookies" type="boolean" default="true">
+      Include request cookies
+    </ParamField>
+    
+    <ParamField path="query_string" type="boolean" default="true">
+      Include URL query parameters
+    </ParamField>
+    
+    <ParamField path="data" type="boolean" default="true">
+      Include request body data
+    </ParamField>
+    
+    <ParamField path="ip" type="boolean" default="false">
+      Include client IP address (requires `sendDefaultPii: true`)
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+## Request Data in Events
+
+Captured data appears in the event's `request` property:
+
+```javascript
+{
+  request: {
+    method: 'POST',
+    url: 'https://example.com/api/users',
+    query_string: 'page=1&limit=10',
+    headers: {
+      'content-type': 'application/json',
+      'user-agent': 'Mozilla/5.0...',
+      'x-api-key': '[Filtered]',
+    },
+    cookies: {
+      session_id: '[Filtered]',
+      preferences: 'dark-mode',
+    },
+    data: {
+      username: 'john_doe',
+      email: 'john@example.com',
+    },
+  },
+  user: {
+    ip_address: '192.168.1.1', // Only if sendDefaultPii: true
+  },
+}
+```
+
+## IP Address Detection
+
+The integration checks these headers for client IP (in order):
+
+1. `x-forwarded-for`
+2. `x-real-ip`
+3. `x-client-ip`
+4. `cf-connecting-ip` (Cloudflare)
+5. `true-client-ip` (Cloudflare Enterprise)
+6. `x-cluster-client-ip`
+7. `forwarded`
+8. Socket remote address
+
+```javascript
+// Headers checked (from packages/core/src/vendor/getIpAddress.ts)
+const ipHeaderNames = [
+  'x-forwarded-for',
+  'x-real-ip',
+  'x-client-ip',
+  'cf-connecting-ip',
+  'true-client-ip',
+  'x-cluster-client-ip',
+  'forwarded',
+];
+```
+
+## Privacy Considerations
+
+<Warning>
+  Be careful about sensitive data in requests. Use `beforeSend` to scrub sensitive information.
+</Warning>
+
+### Excluding Sensitive Headers
+
+Sentry automatically filters common sensitive headers, but you can add more:
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  beforeSend(event) {
+    // Remove sensitive headers
+    if (event.request?.headers) {
+      delete event.request.headers['x-api-key'];
+      delete event.request.headers['authorization'];
+      delete event.request.headers['x-auth-token'];
+    }
+    return event;
+  },
+});
+```
+
+### Excluding Sensitive Cookies
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  beforeSend(event) {
+    if (event.request?.cookies) {
+      delete event.request.cookies['session_token'];
+      delete event.request.cookies['auth_cookie'];
+    }
+    return event;
+  },
+});
+```
+
+### Filtering Request Body Data
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  beforeSend(event) {
+    if (event.request?.data) {
+      // Remove sensitive fields
+      const data = { ...event.request.data };
+      delete data.password;
+      delete data.credit_card;
+      delete data.ssn;
+      event.request.data = data;
+    }
+    return event;
+  },
+});
+```
+
+## Framework Integration
+
+The integration works automatically with popular frameworks:
+
+### Express
+
+```javascript
+import express from 'express';
+import * as Sentry from '@sentry/node';
+
+const app = express();
+
+Sentry.init({
+  dsn: 'your-dsn',
+  integrations: [
+    Sentry.requestDataIntegration(),
+  ],
+});
+
+app.use(Sentry.Handlers.requestHandler());
+
+app.get('/api/users', (req, res) => {
+  // Request data automatically captured on errors
+  throw new Error('Something went wrong');
+});
+
+app.use(Sentry.Handlers.errorHandler());
+```
+
+### Fastify
+
+```javascript
+import Fastify from 'fastify';
+import * as Sentry from '@sentry/node';
+
+const fastify = Fastify();
+
+Sentry.init({
+  dsn: 'your-dsn',
+  integrations: [
+    Sentry.requestDataIntegration(),
+  ],
+});
+
+fastify.get('/api/users', async (request, reply) => {
+  // Request data automatically captured
+  throw new Error('Something went wrong');
+});
+```
+
+### Next.js
+
+```javascript
+// next.config.js
+import { withSentryConfig } from '@sentry/nextjs';
+
+export default withSentryConfig({
+  // Next.js config
+});
+
+// sentry.server.config.js
+import * as Sentry from '@sentry/nextjs';
+
+Sentry.init({
+  dsn: 'your-dsn',
+  // requestDataIntegration is enabled by default
+});
+```
+
+## Source Code
+
+The Request Data integration is implemented in:
+
+`packages/core/src/integrations/requestdata.ts:35`
+
+## Practical Examples
+
+### API Error Context
+
+```javascript
+app.post('/api/orders', async (req, res) => {
+  try {
+    const order = await createOrder(req.body);
+    res.json(order);
+  } catch (error) {
+    Sentry.captureException(error);
+    // Error includes full request context:
+    // - POST /api/orders
+    // - Request body with order data
+    // - Headers, cookies, query params
+    res.status(500).json({ error: 'Failed to create order' });
+  }
+});
+```
+
+### GraphQL Queries
+
+```javascript
+import { ApolloServer } from '@apollo/server';
+
+const server = new ApolloServer({
+  typeDefs,
+  resolvers,
+  formatError: (error) => {
+    Sentry.captureException(error.originalError || error);
+    // Captures GraphQL query in request data
+    return error;
+  },
+});
+```
+
+### Debugging Failed Requests
+
+Request data helps identify patterns in failures:
+
+```javascript
+app.use((req, res, next) => {
+  // Add custom request metadata
+  Sentry.setContext('request_metadata', {
+    route: req.route?.path,
+    params: req.params,
+    authenticated: !!req.user,
+  });
+  
+  next();
+});
+```
+
+## Best Practices
+
+<Tip>
+  Always review captured request data for sensitive information before deploying to production.
+</Tip>
+
+1. **Enable `sendDefaultPii` carefully**: Only when you need user IP addresses
+2. **Filter sensitive data**: Use `beforeSend` to remove passwords, tokens, etc.
+3. **Comply with privacy regulations**: Ensure request data capture complies with GDPR, CCPA, etc.
+4. **Monitor data volume**: Large request bodies increase event size
+
+## Troubleshooting
+
+### Request Data Not Appearing
+
+Ensure the integration is enabled:
+
+```javascript
+Sentry.init({
+  dsn: 'your-dsn',
+  debug: true, // Enable debug logging
+});
+```
+
+### Partial Request Data
+
+Check your `include` configuration:
+
+```javascript
+Sentry.requestDataIntegration({
+  include: {
+    // Ensure all needed fields are true
+  },
+});
+```
+
+## Related
+
+- [Event Filters](/integrations/event-filters) - Filter events by URL or pattern
+- [Context](https://docs.sentry.io/platforms/javascript/enriching-events/context/) - Add custom context
+- [beforeSend](https://docs.sentry.io/platforms/javascript/configuration/filtering/) - Modify events before sending

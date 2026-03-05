@@ -1,0 +1,234 @@
+---
+title: Building Packages
+description: Learn how to build SDK packages for development and production.
+---
+
+Since the Sentry JavaScript SDK is written in TypeScript, you need to transpile the code to JavaScript before it can be used. This guide covers all the build commands available in the monorepo.
+
+## Development Builds
+
+### Build All Packages
+
+For development, use the `build:dev` command which runs transpilation and type generation:
+
+```bash
+yarn build:dev
+```
+
+This runs two Nx targets in parallel:
+- `build:transpile` - Transpiles TypeScript to JavaScript (ESM and CJS)
+- `build:types` - Generates TypeScript type definitions
+
+### Build in Watch Mode
+
+For active development, use watch mode to automatically rebuild on file changes:
+
+```bash
+yarn build:dev:watch
+```
+
+<Tip>
+  Watch mode is recommended when actively developing. It automatically rebuilds packages as you make changes, providing immediate feedback.
+</Tip>
+
+### Build a Single Package
+
+To build only a specific package and its dependencies:
+
+```bash
+yarn build:dev:filter @sentry/react
+```
+
+This will build:
+- The `@sentry/react` package
+- All of its dependencies (`@sentry/browser`, `@sentry/core`, `@sentry/utils`, etc.)
+- All packages that depend on it (`@sentry/gatsby`, `@sentry/nextjs`, etc.)
+
+### Build from a Package Directory
+
+You can also build from within a specific package directory:
+
+```bash
+cd packages/core
+yarn build:dev
+```
+
+## Production Builds
+
+### Full Production Build
+
+For a complete production build:
+
+```bash
+yarn build
+```
+
+This runs multiple build steps defined in `package.json`:
+
+```json
+"build": "node ./scripts/verify-packages-versions.js && nx run-many -t build:transpile build:types build:bundle build:layer"
+```
+
+It includes:
+1. Package version verification
+2. Transpilation (`build:transpile`)
+3. Type generation (`build:types`)
+4. Browser bundles (`build:bundle`)
+5. Lambda layers (`build:layer`)
+
+### Browser Bundles Only
+
+To build only the browser bundles (CDN files):
+
+```bash
+yarn build:bundle
+```
+
+Bundled files are output to `packages/browser/build/bundles/`.
+
+<Note>
+  There are no guarantees about the produced file names, so make sure to check which files are generated after upgrading.
+</Note>
+
+### Build Tarballs for Publishing
+
+To create npm tarballs for testing or publishing:
+
+```bash
+yarn build:tarball
+```
+
+This runs:
+
+```json
+"build:tarball": "run-s clean:tarballs build:tarballs"
+```
+
+It creates `.tgz` files in each package directory that can be:
+- Installed with `yarn add ./path/to/package.tgz`
+- Used in E2E tests with Verdaccio
+- Tested before publishing to npm
+
+## Understanding Build Outputs
+
+### Package Build Structure
+
+After building, each package has the following structure:
+
+```
+packages/core/
+├── build/
+│   ├── cjs/              # CommonJS modules
+│   ├── esm/              # ES modules
+│   ├── types/            # TypeScript definitions
+│   └── types-ts3.8/      # Downleveled types for TS 3.8
+├── src/                  # Source TypeScript files
+└── package.json
+```
+
+### Nx Build Targets
+
+The build system is configured in `nx.json` with specific targets and dependencies:
+
+```json
+"targetDefaults": {
+  "build:dev": {
+    "dependsOn": ["^build:transpile", "^build:types"]
+  },
+  "build:transpile": {
+    "dependsOn": ["^build:transpile"],
+    "outputs": [
+      "{projectRoot}/build/esm",
+      "{projectRoot}/build/cjs"
+    ],
+    "cache": true
+  },
+  "build:types": {
+    "dependsOn": ["^build:types"],
+    "outputs": [
+      "{projectRoot}/build/types",
+      "{projectRoot}/build/types-ts3.8"
+    ],
+    "cache": true
+  }
+}
+```
+
+The `^` prefix means "this target's dependencies from upstream packages."
+
+## Build Caching
+
+Nx caches build outputs in `.nxcache/` to speed up subsequent builds. If you need to clear the cache:
+
+```bash
+# Clear build outputs and caches
+yarn clean
+
+# Clear only caches
+yarn clean:caches
+
+# Clear everything including node_modules
+yarn clean:all
+```
+
+## Package-Level Build Commands
+
+Each package has its own build scripts in `package.json`. For example, `packages/core/package.json`:
+
+```json
+"scripts": {
+  "build": "run-p build:transpile build:types",
+  "build:dev": "yarn build",
+  "build:transpile": "rollup -c rollup.npm.config.mjs",
+  "build:types": "run-s build:types:core build:types:downlevel",
+  "build:types:core": "tsc -p tsconfig.types.json",
+  "build:types:downlevel": "yarn downlevel-dts build/types build/types-ts3.8 --to ts3.8",
+  "build:watch": "run-p build:transpile:watch",
+  "build:dev:watch": "yarn build:watch",
+  "build:transpile:watch": "rollup -c rollup.npm.config.mjs --watch"
+}
+```
+
+## Build Tools
+
+The monorepo uses several build tools:
+
+- **TypeScript** - Type checking and `.d.ts` generation
+- **Rollup** - Bundling and transpilation
+- **Nx** - Task orchestration and caching
+- **npm-run-all** (`run-s`, `run-p`) - Running scripts in sequence or parallel
+- **downlevel-dts** - Creating TypeScript 3.8-compatible type definitions
+
+## Common Build Issues
+
+### "Cannot find module" errors
+
+If you see import errors, you may need to rebuild:
+
+```bash
+yarn build:dev
+```
+
+### Stale build artifacts
+
+If you're seeing unexpected behavior, try cleaning and rebuilding:
+
+```bash
+yarn clean
+yarn build:dev
+```
+
+### Circular dependency warnings
+
+Check for circular dependencies in a package:
+
+```bash
+cd packages/core
+yarn circularDepCheck
+```
+
+## Next Steps
+
+- [Run tests](/contributing/testing) after building
+- Learn about [testing SDK packages locally](/contributing/testing#testing-locally)
+- Understand the [development workflow](/contributing/workflow)

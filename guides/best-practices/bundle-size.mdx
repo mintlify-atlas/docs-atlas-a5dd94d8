@@ -1,0 +1,540 @@
+---
+title: Bundle Size Optimization
+description: Minimize the Sentry SDK's impact on your application bundle size
+---
+
+The Sentry JavaScript SDK is designed to be lightweight, but you can further optimize bundle size by customizing integrations and using tree-shaking.
+
+## Bundle Size Impact
+
+Typical bundle sizes (gzipped):
+
+- **Browser SDK (minimal):** ~25 KB
+- **Browser SDK (with integrations):** ~35-45 KB
+- **Node SDK:** Not relevant for frontend bundles
+- **Framework SDKs:** Similar to Browser SDK + framework-specific code
+
+<Tip>
+The SDK's bundle size impact is usually minimal compared to other dependencies like React, Vue, or large utility libraries.
+</Tip>
+
+## Tree-Shaking
+
+Modern bundlers automatically remove unused code:
+
+```javascript
+// ✅ Good: Named imports enable tree-shaking
+import { init, browserTracingIntegration } from '@sentry/browser';
+
+init({
+  dsn: '__DSN__',
+  integrations: [browserTracingIntegration()],
+});
+
+// ❌ Bad: Namespace imports may include more code
+import * as Sentry from '@sentry/browser';
+
+Sentry.init({
+  dsn: '__DSN__',
+  integrations: [Sentry.browserTracingIntegration()],
+});
+```
+
+<Warning>
+While namespace imports (`import * as Sentry`) are convenient and recommended for better DX, named imports (`import { init }`) may result in slightly smaller bundles with some bundlers.
+</Warning>
+
+## Selective Integration Loading
+
+### Minimal SDK
+
+Disable default integrations and add only what you need:
+
+```javascript
+import {
+  init,
+  globalHandlersIntegration,
+  breadcrumbsIntegration,
+} from '@sentry/browser';
+
+init({
+  dsn: '__DSN__',
+  defaultIntegrations: false, // Disable all defaults
+  integrations: [
+    // Add only what you need
+    globalHandlersIntegration(),
+    breadcrumbsIntegration(),
+  ],
+});
+```
+
+### Conditional Integration Loading
+
+Load heavy integrations only when needed:
+
+```javascript
+import { init } from '@sentry/browser';
+
+const integrations = [];
+
+// Always include core integrations
+import { globalHandlersIntegration } from '@sentry/browser';
+integrations.push(globalHandlersIntegration());
+
+// Conditionally add Replay (larger bundle)
+if (shouldEnableReplay) {
+  const { replayIntegration } = await import('@sentry-internal/replay');
+  integrations.push(replayIntegration());
+}
+
+init({
+  dsn: '__DSN__',
+  integrations,
+});
+```
+
+## Lazy Loading Sentry
+
+Load Sentry asynchronously to improve initial page load:
+
+```javascript
+// Load Sentry after initial render
+window.addEventListener('load', async () => {
+  const Sentry = await import('@sentry/browser');
+  
+  Sentry.init({
+    dsn: '__DSN__',
+  });
+});
+```
+
+<Warning>
+Lazy loading means errors during initial page load won't be captured. Only use this if initial load performance is critical.
+</Warning>
+
+### Smart Lazy Loading
+
+Load immediately on errors, lazily otherwise:
+
+```javascript
+let sentryLoaded = false;
+
+async function loadSentry() {
+  if (sentryLoaded) return;
+  
+  const Sentry = await import('@sentry/browser');
+  Sentry.init({ dsn: '__DSN__' });
+  sentryLoaded = true;
+}
+
+// Load on error
+window.addEventListener('error', loadSentry);
+window.addEventListener('unhandledrejection', loadSentry);
+
+// Load after idle
+if ('requestIdleCallback' in window) {
+  requestIdleCallback(loadSentry);
+} else {
+  setTimeout(loadSentry, 1000);
+}
+```
+
+## CDN Loading
+
+Use the Sentry CDN bundle to avoid bundling:
+
+```html
+<script
+  src="https://browser.sentry-cdn.com/8.0.0/bundle.tracing.replay.min.js"
+  integrity="sha384-..."
+  crossorigin="anonymous"
+></script>
+
+<script>
+  Sentry.init({
+    dsn: '__DSN__',
+  });
+</script>
+```
+
+### Available CDN Bundles
+
+```html
+<!-- Minimal bundle -->
+<script src="https://browser.sentry-cdn.com/8.0.0/bundle.min.js"></script>
+
+<!-- With performance monitoring -->
+<script src="https://browser.sentry-cdn.com/8.0.0/bundle.tracing.min.js"></script>
+
+<!-- With session replay -->
+<script src="https://browser.sentry-cdn.com/8.0.0/bundle.replay.min.js"></script>
+
+<!-- With both -->
+<script src="https://browser.sentry-cdn.com/8.0.0/bundle.tracing.replay.min.js"></script>
+
+<!-- With feedback widget -->
+<script src="https://browser.sentry-cdn.com/8.0.0/bundle.feedback.min.js"></script>
+```
+
+## Framework-Specific Optimizations
+
+### React
+
+Only import what you need:
+
+```javascript
+import { init, reactRouterV6BrowserTracingIntegration } from '@sentry/react';
+import { useEffect } from 'react';
+import {
+  useLocation,
+  useNavigationType,
+  createRoutesFromChildren,
+  matchRoutes,
+} from 'react-router-dom';
+
+init({
+  dsn: '__DSN__',
+  integrations: [
+    reactRouterV6BrowserTracingIntegration({
+      useEffect,
+      useLocation,
+      useNavigationType,
+      createRoutesFromChildren,
+      matchRoutes,
+    }),
+  ],
+});
+```
+
+### Next.js
+
+Next.js SDK is optimized automatically:
+
+```javascript
+// sentry.client.config.ts
+import * as Sentry from '@sentry/nextjs';
+
+Sentry.init({
+  dsn: '__DSN__',
+  // Tree-shaking happens automatically
+});
+```
+
+**Further optimization:**
+
+```javascript
+// next.config.js
+const { withSentryConfig } = require('@sentry/nextjs');
+
+module.exports = withSentryConfig(
+  {
+    // Next.js config
+  },
+  {
+    // Sentry config
+    silent: true,
+    
+    // Exclude source maps from bundle
+    widenClientFileUpload: true,
+    hideSourceMaps: true, // Available in v7
+  }
+);
+```
+
+### Vue
+
+```javascript
+import { init, browserTracingIntegration } from '@sentry/vue';
+
+init({
+  app,
+  dsn: '__DSN__',
+  integrations: [
+    browserTracingIntegration({ router }), // Only if using Vue Router
+  ],
+});
+```
+
+## Bundler Configuration
+
+### Webpack
+
+Optimize tree-shaking:
+
+```javascript
+// webpack.config.js
+module.exports = {
+  optimization: {
+    usedExports: true,
+    sideEffects: false,
+  },
+};
+```
+
+### Vite
+
+Vite optimizes automatically, but you can verify:
+
+```javascript
+// vite.config.js
+import { defineConfig } from 'vite';
+
+export default defineConfig({
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          // Separate Sentry into its own chunk
+          sentry: ['@sentry/browser'],
+        },
+      },
+    },
+  },
+});
+```
+
+### Rollup
+
+```javascript
+// rollup.config.js
+import { terser } from 'rollup-plugin-terser';
+
+export default {
+  plugins: [
+    terser({
+      compress: {
+        pure_funcs: ['console.log'], // Remove debug logs
+      },
+    }),
+  ],
+};
+```
+
+## Feature Flags for Bundle Size
+
+### Disable Debug Code in Production
+
+The SDK includes debug code that's stripped in production:
+
+```javascript
+import { init } from '@sentry/browser';
+
+init({
+  dsn: '__DSN__',
+  debug: false, // Ensure debug is off in production
+});
+```
+
+### Environment-Based Loading
+
+```javascript
+if (process.env.NODE_ENV === 'production') {
+  import('@sentry/browser').then((Sentry) => {
+    Sentry.init({ dsn: '__DSN__' });
+  });
+}
+```
+
+## Measuring Bundle Size
+
+### webpack-bundle-analyzer
+
+```bash
+npm install --save-dev webpack-bundle-analyzer
+```
+
+```javascript
+// webpack.config.js
+const BundleAnalyzerPlugin = require('webpack-bundle-analyzer').BundleAnalyzerPlugin;
+
+module.exports = {
+  plugins: [
+    new BundleAnalyzerPlugin(),
+  ],
+};
+```
+
+### Vite Plugin Visualizer
+
+```bash
+npm install --save-dev rollup-plugin-visualizer
+```
+
+```javascript
+// vite.config.js
+import { visualizer } from 'rollup-plugin-visualizer';
+
+export default {
+  plugins: [
+    visualizer({ open: true }),
+  ],
+};
+```
+
+### Bundle Size Limit
+
+Set size limits to prevent regressions:
+
+```bash
+npm install --save-dev size-limit @size-limit/preset-app
+```
+
+```json
+// package.json
+{
+  "size-limit": [
+    {
+      "path": "dist/bundle.js",
+      "limit": "100 KB"
+    }
+  ]
+}
+```
+
+## Integration Size Reference
+
+Approximate sizes (gzipped):
+
+| Integration | Size | When to Use |
+|-------------|------|-------------|
+| Core SDK | ~25 KB | Always |
+| browserTracingIntegration | ~8 KB | Performance monitoring |
+| replayIntegration | ~35 KB | Session replay |
+| feedbackIntegration | ~15 KB | User feedback |
+| replayCanvasIntegration | ~10 KB | Canvas recording in replay |
+| captureConsoleIntegration | ~2 KB | Console log capture |
+| httpClientIntegration | ~3 KB | HTTP breadcrumbs |
+
+## Best Practices
+
+<Accordion title="Audit integrations regularly">
+  Review which integrations you're using and remove unused ones:
+  
+  ```javascript
+  // Review this list periodically
+  const integrations = [
+    globalHandlersIntegration(),     // ✅ Needed
+    breadcrumbsIntegration(),        // ✅ Needed
+    browserTracingIntegration(),     // ❓ Still using?
+    replayIntegration(),             // ❓ Still needed?
+  ];
+  ```
+</Accordion>
+
+<Accordion title="Use code splitting for heavy features">
+  Load heavy integrations dynamically:
+  
+  ```javascript
+  // Only load replay when needed
+  async function enableReplay() {
+    const { replayIntegration } = await import('@sentry-internal/replay');
+    const client = Sentry.getClient();
+    client.addIntegration(replayIntegration());
+  }
+  ```
+</Accordion>
+
+<Accordion title="Consider CDN for prototyping">
+  During development, use CDN bundles to avoid build config:
+  
+  ```html
+  <!-- Quick setup -->
+  <script src="https://browser.sentry-cdn.com/8.0.0/bundle.min.js"></script>
+  ```
+  
+  Switch to npm package for production for better bundling control.
+</Accordion>
+
+<Accordion title="Monitor bundle size in CI">
+  Add bundle size checks to prevent regressions:
+  
+  ```bash
+  npm run size-limit
+  ```
+</Accordion>
+
+<Accordion title="Don't over-optimize at the expense of functionality">
+  The SDK's impact is usually minimal. Removing error reporting to save 25 KB is rarely worth it.
+</Accordion>
+
+## Complete Minimal Example
+
+```javascript
+// Smallest possible Sentry setup
+import {
+  init,
+  createTransport,
+  makeFetchTransport,
+} from '@sentry/browser';
+
+init({
+  dsn: '__DSN__',
+  
+  // Disable all default integrations
+  defaultIntegrations: false,
+  
+  // Minimal transport
+  transport: makeFetchTransport,
+  
+  // No performance monitoring
+  enableTracing: false,
+});
+
+// This setup is < 20 KB gzipped
+// Only captures manually sent events
+```
+
+## Production-Optimized Example
+
+```javascript
+import {
+  init,
+  browserTracingIntegration,
+  globalHandlersIntegration,
+  breadcrumbsIntegration,
+  dedupeIntegration,
+} from '@sentry/browser';
+
+const isProd = process.env.NODE_ENV === 'production';
+
+init({
+  dsn: '__DSN__',
+  environment: process.env.NODE_ENV,
+  debug: !isProd,
+  
+  // Only essential integrations
+  defaultIntegrations: false,
+  integrations: [
+    globalHandlersIntegration(),
+    breadcrumbsIntegration(),
+    dedupeIntegration(),
+    browserTracingIntegration(),
+  ],
+  
+  // Lower sampling in production
+  tracesSampleRate: isProd ? 0.05 : 1.0,
+  
+  // Minimal breadcrumbs
+  maxBreadcrumbs: 25,
+});
+
+// Load replay only when needed
+if (userWantsReplay) {
+  import('@sentry-internal/replay').then(({ replayIntegration }) => {
+    Sentry.getClient().addIntegration(replayIntegration());
+  });
+}
+
+// ~30 KB gzipped with tracing, ~25 KB without
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Source Maps" href="/guides/best-practices/sourcemaps">
+    Configure source maps for production
+  </Card>
+  <Card title="Performance Monitoring" href="/guides/best-practices/performance">
+    Optimize performance monitoring
+  </Card>
+</CardGroup>

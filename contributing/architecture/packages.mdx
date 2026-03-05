@@ -1,0 +1,460 @@
+---
+title: Package Structure
+description: Deep dive into how individual packages are structured and built in the SDK monorepo.
+---
+
+This guide provides a detailed look at how individual packages are structured, configured, and built within the Sentry JavaScript SDK monorepo.
+
+## Package Anatomy
+
+Every package in the monorepo follows a consistent structure. Let's examine `@sentry/core` as an example.
+
+### Directory Structure
+
+```
+packages/core/
+├── src/                          # Source TypeScript files
+│   ├── index.ts                 # Main entry point (exports public API)
+│   ├── hub.ts                   # Hub implementation
+│   ├── scope.ts                 # Scope implementation
+│   ├── client.ts                # Base client
+│   ├── integration.ts           # Integration interface
+│   ├── tracing/                 # Performance monitoring
+│   │   ├── index.ts
+│   │   ├── span.ts
+│   │   └── ...
+│   ├── utils/                   # Internal utilities
+│   └── types/                   # Type definitions
+├── test/                         # Test files mirror src/ structure
+│   ├── lib/
+│   │   ├── hub.test.ts
+│   │   ├── scope.test.ts
+│   │   └── ...
+│   └── integration/
+├── build/                        # Build output (gitignored)
+│   ├── cjs/                     # CommonJS build
+│   ├── esm/                     # ES modules build
+│   ├── types/                   # TypeScript definitions
+│   └── types-ts3.8/             # Downleveled types
+├── package.json                  # Package configuration
+├── tsconfig.json                 # TypeScript config
+├── tsconfig.types.json           # Config for type generation
+├── rollup.npm.config.mjs         # Rollup build config
+├── vitest.config.ts              # Test configuration
+└── README.md                     # Package documentation
+```
+
+## package.json Configuration
+
+Here's the `package.json` for `@sentry/core` with annotations:
+
+```json
+{
+  "name": "@sentry/core",
+  "version": "10.42.0",
+  "description": "Base implementation for all Sentry JavaScript SDKs",
+  "repository": "git://github.com/getsentry/sentry-javascript.git",
+  "homepage": "https://github.com/getsentry/sentry-javascript/tree/master/packages/core",
+  "author": "Sentry",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "/build"  // Only publish build directory
+  ],
+  
+  // Entry points for different module systems
+  "main": "build/cjs/index.js",
+  "module": "build/esm/index.js",
+  "types": "build/types/index.d.ts",
+  
+  // Modern entry points with conditional exports
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "import": {
+        "types": "./build/types/index.d.ts",
+        "default": "./build/esm/index.js"
+      },
+      "require": {
+        "types": "./build/types/index.d.ts",
+        "default": "./build/cjs/index.js"
+      }
+    }
+  },
+  
+  // TypeScript version compatibility
+  "typesVersions": {
+    "<5.0": {
+      "build/types/index.d.ts": [
+        "build/types-ts3.8/index.d.ts"
+      ]
+    }
+  },
+  
+  "publishConfig": {
+    "access": "public"
+  },
+  
+  // Build and test scripts
+  "scripts": {
+    "build": "run-p build:transpile build:types",
+    "build:dev": "yarn build",
+    "build:transpile": "rollup -c rollup.npm.config.mjs",
+    "build:types": "run-s build:types:core build:types:downlevel",
+    "build:types:core": "tsc -p tsconfig.types.json",
+    "build:types:downlevel": "yarn downlevel-dts build/types build/types-ts3.8 --to ts3.8",
+    "build:watch": "run-p build:transpile:watch",
+    "build:dev:watch": "yarn build:watch",
+    "build:transpile:watch": "rollup -c rollup.npm.config.mjs --watch",
+    "build:tarball": "npm pack",
+    "circularDepCheck": "madge --circular src/index.ts",
+    "clean": "rimraf build coverage sentry-core-*.tgz",
+    "fix": "eslint . --format stylish --fix",
+    "lint": "eslint . --format stylish",
+    "test": "vitest run",
+    "test:watch": "vitest --watch",
+    "yalc:publish": "yalc publish --push --sig"
+  },
+  
+  // Inherit Volta versions from root
+  "volta": {
+    "extends": "../../package.json"
+  },
+  
+  "sideEffects": false,
+  
+  "devDependencies": {
+    "zod": "^3.24.1"
+  }
+}
+```
+
+## TypeScript Configuration
+
+### Main Config (tsconfig.json)
+
+Used for IDE support and linting:
+
+```json
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "outDir": "build",
+    "rootDir": "src",
+    "baseUrl": "src",
+    "paths": {
+      "@sentry/core": ["./src/index.ts"]
+    }
+  },
+  "include": ["src/**/*"],
+  "exclude": ["test/**/*"]
+}
+```
+
+### Types Config (tsconfig.types.json)
+
+Used for generating `.d.ts` files:
+
+```json
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "declaration": true,
+    "declarationMap": true,
+    "emitDeclarationOnly": true,
+    "outDir": "build/types"
+  }
+}
+```
+
+## Build Configuration
+
+### Rollup Config (rollup.npm.config.mjs)
+
+Packages use Rollup for transpilation:
+
+```javascript
+import { makeBaseBundleConfig, makeConfigVariants } from '../../dev-packages/rollup-utils';
+
+export default makeConfigVariants(
+  makeBaseBundleConfig({
+    // Entry point
+    input: 'src/index.ts',
+    
+    // Output both CJS and ESM
+    output: [
+      { format: 'cjs', dir: 'build/cjs' },
+      { format: 'esm', dir: 'build/esm' },
+    ],
+    
+    // External dependencies (not bundled)
+    external: [
+      // All dependencies from package.json
+    ],
+  }),
+);
+```
+
+The `rollup-utils` package in `dev-packages/` provides shared Rollup configuration.
+
+## Build Process
+
+When you run `yarn build:dev` in a package:
+
+### 1. TypeScript Type Generation
+
+```bash
+tsc -p tsconfig.types.json
+```
+
+Outputs:
+```
+build/types/
+├── index.d.ts
+├── hub.d.ts
+├── scope.d.ts
+└── ...
+```
+
+### 2. Downlevel Types for TS 3.8
+
+```bash
+downlevel-dts build/types build/types-ts3.8 --to ts3.8
+```
+
+Outputs:
+```
+build/types-ts3.8/
+├── index.d.ts
+├── hub.d.ts
+└── ...
+```
+
+### 3. Rollup Transpilation
+
+```bash
+rollup -c rollup.npm.config.mjs
+```
+
+Outputs:
+```
+build/cjs/
+├── index.js
+├── hub.js
+└── ...
+
+build/esm/
+├── index.js
+├── hub.js
+└── ...
+```
+
+## Package Categories
+
+### Core Packages
+
+Minimal dependencies, provide foundation:
+
+**`@sentry/core`** - Base SDK
+- No external dependencies
+- Provides: Hub, Scope, Client, Integrations
+- Used by: All platform and framework SDKs
+
+**`@sentry/browser-utils`** - Browser utilities
+- Dependencies: `@sentry/core`
+- Provides: DOM utilities, fetch/XHR instrumentation
+- Used by: Browser-based SDKs
+
+**`@sentry/node-core`** - Node core
+- Dependencies: `@sentry/core`
+- Provides: Node.js-specific functionality (without OTel)
+- Used by: `@sentry/node` and serverless SDKs
+
+### Platform SDKs
+
+**`@sentry/browser`**
+- Dependencies: `@sentry/core`, `@sentry/browser-utils`
+- Provides: Browser SDK, CDN bundles
+- Special build: `build:bundle` creates CDN bundles
+
+**`@sentry/node`**
+- Dependencies: `@sentry/core`, `@sentry/node-core`, `@sentry/opentelemetry`
+- Provides: Node.js SDK with OpenTelemetry instrumentation
+- Includes: HTTP, database, and framework integrations
+
+**`@sentry/bun`**
+- Dependencies: `@sentry/core`, `@sentry/node-core`
+- Provides: Bun runtime SDK
+
+**`@sentry/deno`**
+- Dependencies: `@sentry/core`, `@sentry/browser-utils`
+- Provides: Deno runtime SDK
+
+**`@sentry/cloudflare`**
+- Dependencies: `@sentry/core`
+- Provides: Cloudflare Workers SDK
+- Edge runtime compatible
+
+### Framework Integrations
+
+**`@sentry/react`**
+- Dependencies: `@sentry/browser`, `@sentry/core`
+- Provides: Error boundary, hooks, React Router integration
+- Peer dependencies: `react`
+
+**`@sentry/nextjs`**
+- Dependencies: `@sentry/node`, `@sentry/react`, `@sentry/browser`
+- Provides: Next.js SDK with client/server integration
+- Special: Has client, server, and edge entry points
+- Build config: Webpack plugins for instrumentation
+
+**`@sentry/vue`**
+- Dependencies: `@sentry/browser`, `@sentry/core`
+- Provides: Vue error handler, Vue Router integration
+- Peer dependencies: `vue`
+
+**`@sentry/sveltekit`**
+- Dependencies: `@sentry/node`, `@sentry/svelte`, `@sentry/browser`
+- Provides: SvelteKit SDK with client/server
+- Special: Vite plugins for instrumentation
+
+## Special Build Targets
+
+### CDN Bundles (Browser Only)
+
+The `@sentry/browser` package creates CDN bundles:
+
+```bash
+yarn build:bundle
+```
+
+Outputs:
+```
+build/bundles/
+├── bundle.min.js              # Full SDK
+├── bundle.min.js.map
+├── bundle.tracing.min.js      # SDK + Tracing
+├── bundle.replay.min.js       # SDK + Replay
+└── ...
+```
+
+These are uploaded to `https://browser.sentry-cdn.com/`.
+
+### Lambda Layers (AWS Serverless)
+
+The `@sentry/aws-serverless` package creates Lambda layers:
+
+```bash
+yarn build:layer
+```
+
+### Browser Bundles with Integrations
+
+Some bundles include specific integrations pre-configured.
+
+## Testing Setup
+
+### Vitest Configuration
+
+Packages use Vitest for testing:
+
+```typescript
+// vitest.config.ts
+import { defineConfig } from 'vitest/config';
+
+export default defineConfig({
+  test: {
+    globals: true,
+    environment: 'node', // or 'jsdom' for browser packages
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'json', 'html'],
+    },
+  },
+});
+```
+
+### Test Structure
+
+Tests mirror the source structure:
+
+```
+src/hub.ts → test/lib/hub.test.ts
+src/scope.ts → test/lib/scope.test.ts
+```
+
+## Circular Dependency Checking
+
+Each package can check for circular dependencies:
+
+```bash
+yarn circularDepCheck
+```
+
+This runs Madge on the package:
+
+```bash
+madge --circular src/index.ts
+```
+
+## Package Dependencies
+
+### Internal Dependencies
+
+Use workspace protocol:
+
+```json
+"dependencies": {
+  "@sentry/core": "workspace:*",
+  "@sentry/browser": "workspace:*"
+}
+```
+
+### External Dependencies
+
+Minimize external dependencies to reduce bundle size:
+
+```json
+"dependencies": {
+  "@opentelemetry/api": "^1.0.0"
+}
+```
+
+### Peer Dependencies
+
+Framework integrations specify peer dependencies:
+
+```json
+"peerDependencies": {
+  "react": ">=16.0.0"
+},
+"peerDependenciesMeta": {
+  "react": {
+    "optional": false
+  }
+}
+```
+
+## Publishing
+
+Packages are published to npm with:
+
+```json
+"publishConfig": {
+  "access": "public"
+}
+```
+
+Only the `build/` directory is published:
+
+```json
+"files": ["/build"]
+```
+
+## Next Steps
+
+- Understand the [monorepo structure](/contributing/architecture/monorepo)
+- Learn about [building packages](/contributing/building)
+- Explore the [development workflow](/contributing/workflow)

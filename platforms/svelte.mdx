@@ -1,0 +1,560 @@
+---
+title: Svelte SDK
+description: Error monitoring and performance tracking for Svelte applications
+---
+
+The Sentry Svelte SDK provides error monitoring and performance tracking for standalone Svelte applications. For SvelteKit projects, use the [@sentry/sveltekit](/platforms/sveltekit) SDK.
+
+## Installation
+
+<CodeGroup>
+```bash npm
+npm install @sentry/svelte
+```
+
+```bash yarn
+yarn add @sentry/svelte
+```
+
+```bash pnpm
+pnpm add @sentry/svelte
+```
+</CodeGroup>
+
+## Basic Setup
+
+Initialize Sentry in your entry point (`main.js` or `main.ts`) before bootstrapping your Svelte app:
+
+```typescript
+// main.ts
+import * as Sentry from '@sentry/svelte';
+import App from './App.svelte';
+
+// Initialize Sentry before creating your app
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  
+  integrations: [
+    Sentry.browserTracingIntegration(),
+    Sentry.replayIntegration(),
+  ],
+  
+  // Performance Monitoring
+  tracesSampleRate: 1.0,
+  
+  // Session Replay
+  replaysSessionSampleRate: 0.1,
+  replaysOnErrorSampleRate: 1.0,
+});
+
+// Then bootstrap your Svelte app
+const app = new App({
+  target: document.getElementById('app'),
+});
+
+export default app;
+```
+
+## Error Tracking
+
+### Automatic Error Capture
+
+Uncaught errors are automatically captured:
+
+```svelte
+<script>
+  // This error will be automatically captured
+  function handleClick() {
+    throw new Error('Button click error');
+  }
+</script>
+
+<button on:click={handleClick}>
+  Click me
+</button>
+```
+
+### Manual Error Capture
+
+```svelte
+<script>
+  import * as Sentry from '@sentry/svelte';
+  
+  async function loadData() {
+    try {
+      const response = await fetch('/api/data');
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      Sentry.captureException(error, {
+        tags: {
+          component: 'DataLoader',
+          action: 'loadData',
+        },
+      });
+    }
+  }
+</script>
+```
+
+## Performance Monitoring
+
+### Browser Tracing
+
+Track page load and navigation performance:
+
+```typescript
+import * as Sentry from '@sentry/svelte';
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  
+  integrations: [
+    Sentry.browserTracingIntegration({
+      // Track interactions and long tasks
+      enableInp: true,
+    }),
+  ],
+  
+  tracesSampleRate: 1.0,
+  tracePropagationTargets: ['localhost', /^https:\/\/yourserver\.io\/api/],
+});
+```
+
+### Custom Performance Spans
+
+```svelte
+<script>
+  import * as Sentry from '@sentry/svelte';
+  import { onMount } from 'svelte';
+  
+  let data = [];
+  
+  onMount(async () => {
+    await Sentry.startSpan(
+      {
+        name: 'fetch-initial-data',
+        op: 'http.client',
+      },
+      async () => {
+        const response = await fetch('/api/data');
+        data = await response.json();
+      },
+    );
+  });
+</script>
+```
+
+## Context & Breadcrumbs
+
+### User Context
+
+```svelte
+<script>
+  import * as Sentry from '@sentry/svelte';
+  import { onMount } from 'svelte';
+  
+  export let user;
+  
+  $: if (user) {
+    Sentry.setUser({
+      id: user.id,
+      email: user.email,
+      username: user.username,
+    });
+  }
+  
+  function logout() {
+    Sentry.setUser(null);
+  }
+</script>
+```
+
+### Custom Context & Tags
+
+```svelte
+<script>
+  import * as Sentry from '@sentry/svelte';
+  import { onMount } from 'svelte';
+  
+  onMount(() => {
+    // Set custom context
+    Sentry.setContext('app_state', {
+      theme: 'dark',
+      language: 'en',
+    });
+    
+    // Add tags
+    Sentry.setTag('environment', 'production');
+    Sentry.setTag('feature_flag', 'new-ui');
+  });
+</script>
+```
+
+### Breadcrumbs
+
+```svelte
+<script>
+  import * as Sentry from '@sentry/svelte';
+  
+  function handleNavigation(page) {
+    Sentry.addBreadcrumb({
+      category: 'navigation',
+      message: `User navigated to ${page}`,
+      level: 'info',
+    });
+  }
+  
+  function handleAction(action) {
+    Sentry.addBreadcrumb({
+      category: 'ui.click',
+      message: `User clicked ${action}`,
+      level: 'info',
+      data: {
+        timestamp: Date.now(),
+      },
+    });
+  }
+</script>
+```
+
+## Session Replay
+
+Capture session replays to understand user behavior:
+
+```typescript
+import * as Sentry from '@sentry/svelte';
+
+Sentry.init({
+  dsn: 'YOUR_DSN_HERE',
+  
+  integrations: [
+    Sentry.replayIntegration({
+      // Mask all text content
+      maskAllText: true,
+      
+      // Block all media elements
+      blockAllMedia: true,
+      
+      // Additional privacy options
+      maskAllInputs: true,
+    }),
+  ],
+  
+  // Capture 10% of all sessions
+  replaysSessionSampleRate: 0.1,
+  
+  // Capture 100% of sessions with errors
+  replaysOnErrorSampleRate: 1.0,
+});
+```
+
+## Svelte Stores Integration
+
+Track store updates:
+
+```svelte
+<script>
+  import * as Sentry from '@sentry/svelte';
+  import { writable } from 'svelte/store';
+  
+  // Create a store with Sentry breadcrumbs
+  function createTrackedStore(initialValue, name) {
+    const store = writable(initialValue);
+    
+    return {
+      subscribe: store.subscribe,
+      set: (value) => {
+        Sentry.addBreadcrumb({
+          category: 'state',
+          message: `Store ${name} updated`,
+          level: 'info',
+          data: { value },
+        });
+        store.set(value);
+      },
+      update: (fn) => {
+        store.update((current) => {
+          const newValue = fn(current);
+          Sentry.addBreadcrumb({
+            category: 'state',
+            message: `Store ${name} updated`,
+            level: 'info',
+            data: { value: newValue },
+          });
+          return newValue;
+        });
+      },
+    };
+  }
+  
+  const count = createTrackedStore(0, 'count');
+</script>
+```
+
+## Advanced Features
+
+<Tabs>
+  <Tab title="User Feedback">
+    Collect feedback from users:
+
+    ```typescript
+    import * as Sentry from '@sentry/svelte';
+
+    Sentry.init({
+      dsn: 'YOUR_DSN_HERE',
+      
+      integrations: [
+        Sentry.feedbackIntegration({
+          autoInject: true,
+          colorScheme: 'light',
+        }),
+      ],
+    });
+    ```
+
+    Or manually trigger feedback:
+
+    ```svelte
+    <script>
+      import * as Sentry from '@sentry/svelte';
+      
+      function showFeedback() {
+        const feedback = Sentry.getFeedback();
+        if (feedback) {
+          feedback.open();
+        }
+      }
+    </script>
+
+    <button on:click={showFeedback}>
+      Send Feedback
+    </button>
+    ```
+  </Tab>
+
+  <Tab title="HTTP Monitoring">
+    Track fetch requests:
+
+    ```typescript
+    import * as Sentry from '@sentry/svelte';
+
+    Sentry.init({
+      dsn: 'YOUR_DSN_HERE',
+      
+      integrations: [
+        Sentry.httpClientIntegration({
+          failedRequestStatusCodes: [[400, 599]],
+        }),
+      ],
+    });
+    ```
+  </Tab>
+
+  <Tab title="Browser Profiling">
+    Profile JavaScript performance:
+
+    ```typescript
+    import * as Sentry from '@sentry/svelte';
+
+    Sentry.init({
+      dsn: 'YOUR_DSN_HERE',
+      
+      integrations: [
+        Sentry.browserProfilingIntegration(),
+      ],
+      
+      profilesSampleRate: 1.0,
+    });
+    ```
+  </Tab>
+</Tabs>
+
+## Component-Level Error Handling
+
+```svelte
+<script>
+  import * as Sentry from '@sentry/svelte';
+  import { onMount, onDestroy } from 'svelte';
+  
+  let error = null;
+  let errorBoundary = null;
+  
+  onMount(() => {
+    errorBoundary = (event) => {
+      error = event.error;
+      Sentry.captureException(event.error, {
+        contexts: {
+          svelte: {
+            component: 'MyComponent',
+          },
+        },
+      });
+    };
+    
+    window.addEventListener('error', errorBoundary);
+  });
+  
+  onDestroy(() => {
+    if (errorBoundary) {
+      window.removeEventListener('error', errorBoundary);
+    }
+  });
+</script>
+
+{#if error}
+  <div class="error-boundary">
+    <h2>Something went wrong</h2>
+    <p>{error.message}</p>
+  </div>
+{:else}
+  <slot />
+{/if}
+```
+
+## Source Maps
+
+Generate and upload source maps for better stack traces:
+
+<Tabs>
+  <Tab title="Vite">
+    Configure Vite to generate source maps:
+
+    ```javascript
+    // vite.config.js
+    import { defineConfig } from 'vite';
+    import { svelte } from '@sveltejs/vite-plugin-svelte';
+
+    export default defineConfig({
+      plugins: [svelte()],
+      
+      build: {
+        sourcemap: true,
+      },
+    });
+    ```
+  </Tab>
+
+  <Tab title="Rollup">
+    Enable source maps in Rollup:
+
+    ```javascript
+    // rollup.config.js
+    export default {
+      // ...
+      output: {
+        sourcemap: true,
+      },
+    };
+    ```
+  </Tab>
+</Tabs>
+
+Then upload source maps using `sentry-cli`:
+
+```bash
+sentry-cli sourcemaps upload \
+  --org your-org \
+  --project your-project \
+  ./dist
+```
+
+## Configuration Options
+
+<Accordion title="Common Configuration">
+  ```typescript
+  import * as Sentry from '@sentry/svelte';
+
+  Sentry.init({
+    dsn: 'YOUR_DSN_HERE',
+    
+    // Environment
+    environment: 'production',
+    release: 'my-app@1.0.0',
+    
+    // Sampling
+    tracesSampleRate: 0.2,
+    replaysSessionSampleRate: 0.1,
+    replaysOnErrorSampleRate: 1.0,
+    
+    // Performance
+    tracePropagationTargets: [
+      'localhost',
+      /^https:\/\/api\.example\.com/,
+    ],
+    
+    // Error Filtering
+    ignoreErrors: [
+      'ResizeObserver loop limit exceeded',
+      /^Non-Error promise rejection/,
+    ],
+    
+    beforeSend(event, hint) {
+      // Modify or filter events
+      if (event.request) {
+        delete event.request.cookies;
+      }
+      return event;
+    },
+    
+    beforeBreadcrumb(breadcrumb, hint) {
+      // Filter or modify breadcrumbs
+      if (breadcrumb.category === 'console') {
+        return null;
+      }
+      return breadcrumb;
+    },
+  });
+  ```
+</Accordion>
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Initialize Early" icon="bolt">
+    Call `Sentry.init()` before creating your Svelte app.
+  </Card>
+  
+  <Card title="Source Maps" icon="map">
+    Always generate and upload source maps for production builds.
+  </Card>
+  
+  <Card title="Store Tracking" icon="database">
+    Add breadcrumbs for store updates to understand state changes.
+  </Card>
+  
+  <Card title="Context" icon="circle-info">
+    Set user context and tags to make debugging easier.
+  </Card>
+</CardGroup>
+
+## Migration to SvelteKit
+
+If you're using SvelteKit, switch to the dedicated SDK:
+
+```bash
+npm uninstall @sentry/svelte
+npm install @sentry/sveltekit
+```
+
+See the [SvelteKit SDK documentation](/platforms/sveltekit) for setup instructions.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="SvelteKit" icon="rocket" href="/platforms/sveltekit">
+    Upgrade to SvelteKit SDK for full-stack support
+  </Card>
+  
+  <Card title="Source Maps" icon="map" href="/sourcemaps">
+    Learn how to upload source maps
+  </Card>
+  
+  <Card title="Session Replay" icon="video" href="/session-replay">
+    Set up session replay
+  </Card>
+  
+  <Card title="Performance" icon="gauge-high" href="/performance">
+    Deep dive into performance monitoring
+  </Card>
+</CardGroup>

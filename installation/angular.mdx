@@ -1,0 +1,634 @@
+---
+title: 'Angular Installation'
+description: 'Install and configure the Sentry SDK for Angular applications'
+---
+
+The `@sentry/angular` package provides error tracking and performance monitoring for Angular applications. It includes Angular-specific integrations like ErrorHandler, TraceService, and component tracking.
+
+## Prerequisites
+
+- Node.js 18 or newer
+- Angular 14 to 21
+- RxJS 6.5.5+ or 7.x
+- A Sentry account and project DSN
+
+<Note>
+  Angular versions 14-21 are officially supported. For older versions, check the [compatibility table](https://docs.sentry.io/platforms/javascript/guides/angular/#angular-version-compatibility).
+</Note>
+
+## Installation
+
+<Steps>
+  <Step title="Install the Package">
+    Install `@sentry/angular` using your preferred package manager:
+
+    <CodeGroup>
+    ```bash npm
+    npm install @sentry/angular
+    ```
+
+    ```bash yarn
+    yarn add @sentry/angular
+    ```
+
+    ```bash pnpm
+    pnpm add @sentry/angular
+    ```
+    </CodeGroup>
+
+    **Current Version:** 10.42.0
+  </Step>
+
+  <Step title="Initialize Sentry">
+    Initialize Sentry **before** you bootstrap your Angular application in `main.ts`:
+
+    ```typescript
+    import { bootstrapApplication } from '@angular/platform-browser';
+    import { init } from '@sentry/angular';
+    import { AppComponent } from './app/app.component';
+    import { appConfig } from './app/app.config';
+
+    init({
+      dsn: 'YOUR_DSN_HERE',
+      
+      integrations: [
+        // Add Angular-specific integrations
+      ],
+      
+      // Tracing
+      tracesSampleRate: 1.0,
+    });
+
+    bootstrapApplication(AppComponent, appConfig)
+      .catch((err) => console.error(err));
+    ```
+  </Step>
+
+  <Step title="Configure Error Handler">
+    Register the Sentry `ErrorHandler` provider in your app configuration:
+
+    ```typescript
+    import { ApplicationConfig, ErrorHandler } from '@angular/core';
+    import { provideRouter } from '@angular/router';
+    import { createErrorHandler } from '@sentry/angular';
+    import { routes } from './app.routes';
+
+    export const appConfig: ApplicationConfig = {
+      providers: [
+        provideRouter(routes),
+        {
+          provide: ErrorHandler,
+          useValue: createErrorHandler({
+            showDialog: true,
+          }),
+        },
+      ],
+    };
+    ```
+
+    <Note>
+      For NgModule-based apps, add the provider to your `AppModule` instead.
+    </Note>
+  </Step>
+
+  <Step title="Verify Installation">
+    Test that Sentry is working:
+
+    ```typescript
+    import * as Sentry from '@sentry/angular';
+
+    Sentry.captureException(new Error('Test error'));
+    ```
+
+    Check your Sentry dashboard to see the error.
+  </Step>
+</Steps>
+
+## NgModule Configuration (Legacy)
+
+For older Angular applications using NgModule:
+
+```typescript
+import { NgModule, ErrorHandler } from '@angular/core';
+import { BrowserModule } from '@angular/platform-browser';
+import { createErrorHandler } from '@sentry/angular';
+import { AppComponent } from './app.component';
+
+@NgModule({
+  declarations: [AppComponent],
+  imports: [BrowserModule],
+  providers: [
+    {
+      provide: ErrorHandler,
+      useValue: createErrorHandler({
+        showDialog: true,
+      }),
+    },
+  ],
+  bootstrap: [AppComponent],
+})
+export class AppModule {}
+```
+
+## Error Handler Options
+
+Customize the error handler behavior:
+
+```typescript
+import { createErrorHandler } from '@sentry/angular';
+
+export const appConfig: ApplicationConfig = {
+  providers: [
+    {
+      provide: ErrorHandler,
+      useValue: createErrorHandler({
+        // Show the user feedback dialog
+        showDialog: true,
+        
+        // Configure dialog options
+        dialogOptions: {
+          title: 'It looks like we\'re having issues.',
+          subtitle: 'Our team has been notified.',
+          subtitle2: 'If you\'d like to help, tell us what happened below.',
+          user: {
+            email: 'user@example.com',
+            name: 'John Doe',
+          },
+        },
+        
+        // Log errors to console
+        logErrors: true,
+      }),
+    },
+  ],
+};
+```
+
+## Performance Monitoring
+
+### Basic Configuration
+
+<Steps>
+  <Step title="Enable Browser Tracing">
+    Add the browser tracing integration:
+
+    ```typescript
+    import { init, browserTracingIntegration } from '@sentry/angular';
+
+    init({
+      dsn: 'YOUR_DSN_HERE',
+      
+      integrations: [
+        browserTracingIntegration(),
+      ],
+      
+      tracesSampleRate: 1.0,
+      tracePropagationTargets: ['localhost', 'https://yourserver.io/api'],
+    });
+    ```
+  </Step>
+
+  <Step title="Initialize TraceService">
+    Inject the `TraceService` in your app initialization to enable Angular Router tracking:
+
+    ```typescript
+    import { ApplicationConfig, APP_INITIALIZER } from '@angular/core';
+    import { TraceService } from '@sentry/angular';
+
+    export const appConfig: ApplicationConfig = {
+      providers: [
+        {
+          provide: APP_INITIALIZER,
+          useFactory: () => () => {},
+          deps: [TraceService],
+          multi: true,
+        },
+      ],
+    };
+    ```
+
+    **Angular 19+**: Use `provideAppInitializer`:
+
+    ```typescript
+    import { ApplicationConfig, provideAppInitializer, inject } from '@angular/core';
+    import { TraceService } from '@sentry/angular';
+
+    export const appConfig: ApplicationConfig = {
+      providers: [
+        provideAppInitializer(() => inject(TraceService)),
+      ],
+    };
+    ```
+  </Step>
+</Steps>
+
+### NgModule Configuration
+
+For NgModule-based apps:
+
+```typescript
+import { NgModule, APP_INITIALIZER } from '@angular/core';
+import { TraceService } from '@sentry/angular';
+
+@NgModule({
+  providers: [
+    {
+      provide: APP_INITIALIZER,
+      useFactory: () => () => {},
+      deps: [TraceService],
+      multi: true,
+    },
+  ],
+})
+export class AppModule {}
+```
+
+## Component Tracking
+
+Track Angular component performance with three different methods:
+
+### 1. TraceDirective
+
+Track component lifecycle in templates:
+
+```typescript
+import { Component } from '@angular/core';
+import { TraceModule } from '@sentry/angular';
+
+@Component({
+  selector: 'app-dashboard',
+  standalone: true,
+  imports: [TraceModule],
+  template: `
+    <app-header trace="header"></app-header>
+    <app-sidebar trace="sidebar"></app-sidebar>
+    <app-content trace="content"></app-content>
+    <app-footer trace="footer"></app-footer>
+  `,
+})
+export class DashboardComponent {}
+```
+
+<Note>
+  The directive's `name` attribute is required and will be used as the span name.
+</Note>
+
+### 2. TraceClass Decorator
+
+Track component lifecycle in component classes:
+
+```typescript
+import { Component } from '@angular/core';
+import { TraceClass } from '@sentry/angular';
+
+@Component({
+  selector: 'app-header',
+  templateUrl: './header.component.html',
+})
+@TraceClass()
+export class HeaderComponent {
+  // Component code
+}
+```
+
+### 3. TraceMethod Decorator
+
+Track specific lifecycle hooks:
+
+```typescript
+import { Component, OnInit } from '@angular/core';
+import { TraceMethod } from '@sentry/angular';
+
+@Component({
+  selector: 'app-footer',
+  templateUrl: './footer.component.html',
+})
+export class FooterComponent implements OnInit {
+  @TraceMethod()
+  ngOnInit() {
+    // Initialization code
+  }
+  
+  @TraceMethod()
+  ngAfterViewInit() {
+    // After view initialization
+  }
+}
+```
+
+## Custom Spans
+
+Create custom performance spans:
+
+```typescript
+import { Component } from '@angular/core';
+import { startSpan } from '@sentry/angular';
+
+@Component({
+  selector: 'app-data',
+  templateUrl: './data.component.html',
+})
+export class DataComponent {
+  async loadData() {
+    const data = await startSpan(
+      {
+        name: 'fetch-user-data',
+        op: 'http.client',
+      },
+      async () => {
+        const response = await fetch('/api/user');
+        return response.json();
+      }
+    );
+    
+    return data;
+  }
+}
+```
+
+## Tracking Application Bootstrap
+
+Measure how long your Angular app takes to bootstrap:
+
+```typescript
+import { platformBrowserDynamic } from '@angular/platform-browser-dynamic';
+import { init, startSpan } from '@sentry/angular';
+import { AppModule } from './app/app.module';
+
+init({
+  dsn: 'YOUR_DSN_HERE',
+  integrations: [browserTracingIntegration()],
+  tracesSampleRate: 1.0,
+});
+
+startSpan(
+  {
+    name: 'platform-browser-dynamic',
+    op: 'ui.angular.bootstrap',
+  },
+  async () => {
+    await platformBrowserDynamic().bootstrapModule(AppModule);
+  }
+);
+```
+
+## Usage
+
+### Capturing Errors
+
+```typescript
+import { Component } from '@angular/core';
+import * as Sentry from '@sentry/angular';
+
+@Component({
+  selector: 'app-user',
+  templateUrl: './user.component.html',
+})
+export class UserComponent {
+  async loadUser(id: string) {
+    try {
+      const response = await fetch(`/api/users/${id}`);
+      return response.json();
+    } catch (error) {
+      Sentry.captureException(error);
+      throw error;
+    }
+  }
+}
+```
+
+### Setting Context
+
+```typescript
+import { Component, OnInit } from '@angular/core';
+import * as Sentry from '@sentry/angular';
+import { AuthService } from './auth.service';
+
+@Component({
+  selector: 'app-root',
+  templateUrl: './app.component.html',
+})
+export class AppComponent implements OnInit {
+  constructor(private auth: AuthService) {}
+  
+  ngOnInit() {
+    this.auth.user$.subscribe(user => {
+      if (user) {
+        Sentry.setUser({
+          id: user.id,
+          email: user.email,
+          username: user.username,
+        });
+      } else {
+        Sentry.setUser(null);
+      }
+    });
+    
+    // Set tags
+    Sentry.setTag('angular_version', '17.0.0');
+    
+    // Set extra context
+    Sentry.setExtra('build_number', '12345');
+  }
+}
+```
+
+### Adding Breadcrumbs
+
+```typescript
+import { Component } from '@angular/core';
+import * as Sentry from '@sentry/angular';
+
+@Component({
+  selector: 'app-form',
+  templateUrl: './form.component.html',
+})
+export class FormComponent {
+  onSubmit(formData: any) {
+    Sentry.addBreadcrumb({
+      category: 'form',
+      message: 'User submitted form',
+      level: 'info',
+      data: {
+        formId: 'contact-form',
+        fields: Object.keys(formData),
+      },
+    });
+    
+    this.submitForm(formData);
+  }
+}
+```
+
+## HttpClient Integration
+
+Automatically capture HTTP errors:
+
+```typescript
+import { ApplicationConfig, provideHttpClient } from '@angular/core';
+
+export const appConfig: ApplicationConfig = {
+  providers: [
+    provideHttpClient(),
+    // Sentry automatically instruments HttpClient
+  ],
+};
+```
+
+The SDK will automatically:
+- Create spans for HTTP requests
+- Capture HTTP errors
+- Add breadcrumbs for requests
+
+## Session Replay
+
+Capture session replays:
+
+```typescript
+import { init, browserTracingIntegration, replayIntegration } from '@sentry/angular';
+
+init({
+  dsn: 'YOUR_DSN_HERE',
+  
+  integrations: [
+    browserTracingIntegration(),
+    replayIntegration({
+      maskAllText: true,
+      blockAllMedia: true,
+    }),
+  ],
+  
+  tracesSampleRate: 1.0,
+  replaysSessionSampleRate: 0.1,
+  replaysOnErrorSampleRate: 1.0,
+});
+```
+
+## Advanced Configuration
+
+### TypeScript
+
+The SDK is written in TypeScript and includes full type definitions:
+
+```typescript
+import type { ErrorHandlerOptions } from '@sentry/angular';
+
+const errorHandlerOptions: ErrorHandlerOptions = {
+  showDialog: true,
+  logErrors: true,
+  dialogOptions: {
+    title: 'An error occurred',
+  },
+};
+```
+
+### Custom Transport
+
+```typescript
+import { init, makeBrowserOfflineTransport, makeFetchTransport } from '@sentry/angular';
+
+init({
+  dsn: 'YOUR_DSN_HERE',
+  transport: makeBrowserOfflineTransport(makeFetchTransport),
+});
+```
+
+### Filtering Events
+
+```typescript
+init({
+  dsn: 'YOUR_DSN_HERE',
+  
+  beforeSend(event, hint) {
+    // Don't send errors from development
+    if (window.location.hostname === 'localhost') {
+      return null;
+    }
+    
+    return event;
+  },
+  
+  beforeBreadcrumb(breadcrumb, hint) {
+    // Don't record console breadcrumbs
+    if (breadcrumb.category === 'console') {
+      return null;
+    }
+    
+    return breadcrumb;
+  },
+});
+```
+
+## Troubleshooting
+
+### Source Maps
+
+For Angular CLI projects:
+
+1. Install the Sentry Webpack plugin:
+   ```bash
+   npm install @sentry/webpack-plugin --save-dev
+   ```
+
+2. Configure in `angular.json`:
+   ```json
+   {
+     "projects": {
+       "your-app": {
+         "architect": {
+           "build": {
+             "options": {
+               "sourceMap": true
+             }
+           }
+         }
+       }
+     }
+   }
+   ```
+
+3. Add custom webpack config with `@angular-builders/custom-webpack`
+
+### Zone.js Compatibility
+
+Sentry is compatible with Zone.js. Make sure Zone.js is loaded before Sentry:
+
+```typescript
+// polyfills.ts
+import 'zone.js';
+
+// main.ts
+import { init } from '@sentry/angular';
+// Zone.js is already loaded
+```
+
+### Errors Not Captured
+
+Make sure:
+1. `Sentry.init()` is called before bootstrapping Angular
+2. The `ErrorHandler` provider is registered
+3. The error is not caught without re-throwing
+
+<Warning>
+  Initialize Sentry **before** calling `bootstrapApplication()` or `platformBrowserDynamic().bootstrapModule()`.
+</Warning>
+
+### Performance Not Tracked
+
+Ensure:
+1. `browserTracingIntegration()` is added
+2. `TraceService` is injected via `APP_INITIALIZER`
+3. `tracesSampleRate` is greater than 0
+
+## Next Steps
+
+- Configure [Angular Router Integration](/essentials/angular-router)
+- Set up [HttpClient Monitoring](/essentials/http-monitoring)
+- Learn about [Session Replay](/essentials/session-replay)
+- Explore [Performance Monitoring](/essentials/performance-monitoring)
+
+## Related Documentation
+
+- [Official Angular SDK Docs](https://docs.sentry.io/platforms/javascript/guides/angular/)
+- [Sentry Angular Package on npm](https://www.npmjs.com/package/@sentry/angular)
+- [Source Code on GitHub](https://github.com/getsentry/sentry-javascript/tree/master/packages/angular)
