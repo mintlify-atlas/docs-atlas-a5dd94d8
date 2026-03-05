@@ -1,0 +1,308 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "Sentry JavaScript SDK",
+  "projectDescription": "Official Sentry SDKs for JavaScript error monitoring, performance tracking, and user feedback across all JavaScript platforms and frameworks",
+  "theme": "palm",
+  "primaryColor": "#5b3876",
+  "lightColor": "#ac93b6",
+  "darkColor": "#d9d0df",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Getting Started",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "introduction",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Installation",
+            "pages": [
+              "installation/browser",
+              "installation/node",
+              "installation/react",
+              "installation/vue",
+              "installation/angular",
+              "installation/nextjs",
+              "installation/sveltekit",
+              "installation/remix",
+              "installation/nuxt",
+              "installation/other-frameworks"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Platform SDKs",
+        "groups": [
+          {
+            "group": "Browser & Frontend",
+            "pages": [
+              "platforms/browser",
+              "platforms/react",
+              "platforms/vue",
+              "platforms/angular",
+              "platforms/svelte",
+              "platforms/solid",
+              "platforms/ember"
+            ]
+          },
+          {
+            "group": "Server & Backend",
+            "pages": [
+              "platforms/node",
+              "platforms/bun",
+              "platforms/deno",
+              "platforms/cloudflare"
+            ]
+          },
+          {
+            "group": "Full-Stack Frameworks",
+            "pages": [
+              "platforms/nextjs",
+              "platforms/sveltekit",
+              "platforms/remix",
+              "platforms/nuxt",
+              "platforms/astro",
+              "platforms/gatsby"
+            ]
+          },
+          {
+            "group": "Serverless & Edge",
+            "pages": [
+              "platforms/aws-serverless",
+              "platforms/google-cloud-serverless",
+              "platforms/vercel-edge"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Core Concepts",
+        "groups": [
+          {
+            "group": "Error Monitoring",
+            "pages": [
+              "core/error-monitoring",
+              "core/scopes",
+              "core/context",
+              "core/breadcrumbs"
+            ]
+          },
+          {
+            "group": "Performance Monitoring",
+            "pages": [
+              "core/performance",
+              "core/tracing",
+              "core/spans",
+              "core/distributed-tracing"
+            ]
+          },
+          {
+            "group": "Advanced Features",
+            "pages": [
+              "core/session-replay",
+              "core/profiling",
+              "core/user-feedback",
+              "core/feature-flags",
+              "core/logs-metrics"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Integrations",
+        "groups": [
+          {
+            "group": "Core Integrations",
+            "pages": [
+              "integrations/overview",
+              "integrations/event-filters",
+              "integrations/linked-errors",
+              "integrations/dedupe",
+              "integrations/request-data"
+            ]
+          },
+          {
+            "group": "AI Monitoring",
+            "pages": [
+              "integrations/ai/overview",
+              "integrations/ai/openai",
+              "integrations/ai/anthropic",
+              "integrations/ai/google-genai",
+              "integrations/ai/langchain",
+              "integrations/ai/langgraph",
+              "integrations/ai/vercel-ai"
+            ]
+          },
+          {
+            "group": "Database & Backend",
+            "pages": [
+              "integrations/supabase",
+              "integrations/postgres",
+              "integrations/mcp-server"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Core SDK",
+            "pages": [
+              "api/core/client",
+              "api/core/scope",
+              "api/core/transport",
+              "api/core/integrations"
+            ]
+          },
+          {
+            "group": "Capture Methods",
+            "pages": [
+              "api/capture/exception",
+              "api/capture/message",
+              "api/capture/event",
+              "api/capture/breadcrumb"
+            ]
+          },
+          {
+            "group": "Tracing API",
+            "pages": [
+              "api/tracing/spans",
+              "api/tracing/trace-context",
+              "api/tracing/propagation"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "api/configuration/options",
+              "api/configuration/transport-options",
+              "api/configuration/sampling"
+            ]
+          },
+          {
+            "group": "Types",
+            "pages": [
+              "api/types/event",
+              "api/types/span",
+              "api/types/breadcrumb",
+              "api/types/user"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Guides",
+        "groups": [
+          {
+            "group": "Configuration",
+            "pages": [
+              "guides/configuration/setup",
+              "guides/configuration/environment",
+              "guides/configuration/sampling",
+              "guides/configuration/filtering"
+            ]
+          },
+          {
+            "group": "Best Practices",
+            "pages": [
+              "guides/best-practices/error-handling",
+              "guides/best-practices/performance",
+              "guides/best-practices/bundle-size",
+              "guides/best-practices/sourcemaps"
+            ]
+          },
+          {
+            "group": "Migration",
+            "pages": [
+              "guides/migration/v7-to-v8",
+              "guides/migration/v8-to-v10",
+              "guides/migration/upgrading"
+            ]
+          },
+          {
+            "group": "Advanced",
+            "pages": [
+              "guides/advanced/custom-integrations",
+              "guides/advanced/custom-transports",
+              "guides/advanced/tunneling",
+              "guides/advanced/opentelemetry"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Contributing",
+        "groups": [
+          {
+            "group": "Development",
+            "pages": [
+              "contributing/setup",
+              "contributing/building",
+              "contributing/testing",
+              "contributing/workflow"
+            ]
+          },
+          {
+            "group": "Architecture",
+            "pages": [
+              "contributing/architecture/overview",
+              "contributing/architecture/monorepo",
+              "contributing/architecture/packages"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Error monitoring and exception tracking across all JavaScript platforms",
+    "Performance monitoring with distributed tracing and OpenTelemetry",
+    "40+ platform-specific SDKs (Browser, Node, React, Vue, Next.js, etc.)",
+    "AI monitoring integrations (OpenAI, Anthropic, LangChain, Vercel AI)",
+    "Session replay with canvas recording",
+    "Profiling for Node.js applications",
+    "User feedback collection",
+    "Feature flags integration",
+    "Breadcrumbs and context management",
+    "Serverless and edge runtime support"
+  ],
+  "publicApiSurface": [
+    "Sentry.init()",
+    "Sentry.captureException()",
+    "Sentry.captureMessage()",
+    "Sentry.captureEvent()",
+    "Sentry.addBreadcrumb()",
+    "Sentry.setContext()",
+    "Sentry.setUser()",
+    "Sentry.setTag()",
+    "Sentry.setExtra()",
+    "Sentry.withScope()",
+    "Sentry.getCurrentScope()",
+    "Sentry.getIsolationScope()",
+    "Sentry.startSpan()",
+    "Sentry.getActiveSpan()",
+    "Sentry.captureFeedback()",
+    "Sentry.close()",
+    "Sentry.flush()",
+    "instrumentOpenAiClient()",
+    "instrumentAnthropicAiClient()",
+    "instrumentGoogleGenAIClient()",
+    "createLangChainCallbackHandler()",
+    "instrumentLangGraph()",
+    "addVercelAiProcessors()",
+    "Client",
+    "Scope",
+    "ErrorBoundary (React)",
+    "withErrorBoundary (React)",
+    "Profiler (React)",
+    "sentryVitePlugin",
+    "sentryWebpackPlugin",
+    "sentryRollupPlugin"
+  ]
+}
